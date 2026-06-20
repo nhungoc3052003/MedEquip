@@ -1,0 +1,133 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&display=swap');
+
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
+
+@layer base {
+  :root {
+    --background: 210 20% 98%;
+    --foreground: 215 25% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 215 25% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 25% 15%;
+
+    --primary: 199 89% 38%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 199 30% 94%;
+    --secondary-foreground: 199 89% 28%;
+
+    --muted: 210 15% 95%;
+    --muted-foreground: 215 10% 50%;
+
+    --accent: 162 63% 41%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 210 15% 90%;
+    --input: 210 15% 90%;
+    --ring: 199 89% 38%;
+
+    --radius: 0.75rem;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    --success: 162 63% 41%;
+    --success-foreground: 0 0% 100%;
+
+    --info: 199 89% 38%;
+    --info-foreground: 0 0% 100%;
+
+    --sidebar-background: 215 25% 15%;
+    --sidebar-foreground: 210 15% 80%;
+    --sidebar-primary: 199 89% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 215 20% 20%;
+    --sidebar-accent-foreground: 210 15% 90%;
+    --sidebar-border: 215 20% 22%;
+    --sidebar-ring: 199 89% 48%;
+    --sidebar-muted: 215 15% 30%;
+  }
+
+  .dark {
+    --background: 215 25% 10%;
+    --foreground: 210 15% 90%;
+    --card: 215 25% 13%;
+    --card-foreground: 210 15% 90%;
+    --popover: 215 25% 13%;
+    --popover-foreground: 210 15% 90%;
+    --primary: 199 89% 48%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 215 20% 18%;
+    --secondary-foreground: 199 70% 70%;
+    --muted: 215 20% 18%;
+    --muted-foreground: 215 10% 55%;
+    --accent: 162 63% 41%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 215 20% 20%;
+    --input: 215 20% 20%;
+    --ring: 199 89% 48%;
+    --sidebar-background: 215 30% 8%;
+    --sidebar-foreground: 210 15% 75%;
+    --sidebar-primary: 199 89% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 215 25% 14%;
+    --sidebar-accent-foreground: 210 15% 85%;
+    --sidebar-border: 215 25% 14%;
+    --sidebar-ring: 199 89% 48%;
+    --sidebar-muted: 215 20% 20%;
+  }
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: 'Manrope', system-ui, sans-serif;
+  }
+
+  /* Ẩn con mắt mặc định của trình duyệt để không bị trùng với icon tùy chỉnh */
+  input::-ms-reveal, input::-ms-clear {
+    display: none;
+  }
+}
+
+@layer utilities {
+  .gradient-primary {
+    background: linear-gradient(135deg, hsl(199, 89%, 38%), hsl(199, 89%, 48%));
+  }
+  .gradient-accent {
+    background: linear-gradient(135deg, hsl(162, 63%, 41%), hsl(162, 63%, 51%));
+  }
+  .gradient-sidebar {
+    background: linear-gradient(180deg, hsl(215, 25%, 15%), hsl(215, 30%, 12%));
+  }
+  .shadow-card {
+    box-shadow: 0 1px 3px 0 rgba(0,0,0,0.06), 0 1px 2px 0 rgba(0,0,0,0.04);
+  }
+  .shadow-card-hover {
+    box-shadow: 0 4px 12px 0 rgba(0,0,0,0.08), 0 2px 4px 0 rgba(0,0,0,0.04);
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-in-out;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}
