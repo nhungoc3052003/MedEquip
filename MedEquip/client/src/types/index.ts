@@ -76,6 +76,7 @@ export interface PhieuYeuCauCapPhat {
   ngayDuyet?: string;
   nguoiDuyet?: string;
   lyDoTuChoi?: string;
+  anhMinhChung?: string;
 }
 
 // v4: PhieuCapPhat với ngày hạn trả và trạng thái trả
@@ -196,6 +197,7 @@ export interface PhieuTraThietBi {
   trangThai: 'CHO_TRUONG_KHOA_DUYET' | 'CHO_QL_KHO_DUYET' | 'CHO_XAC_NHAN' | 'DA_TRA' | 'TU_CHOI' | 'HUY';
   ghiChu?: string;
   qrData?: string;
+  anhMinhChung?: string;
   chiTiet: ChiTietPhieuTra[];
 }
 

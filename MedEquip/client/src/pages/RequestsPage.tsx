@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { toast } from '@/hooks/use-toast';
-import { Search, CheckCheck, ShoppingCart, Plus, Minus, X, Trash2, Box, Camera, QrCode, RotateCcw, PackageCheck, ClipboardList, AlertCircle, Upload, Keyboard, Bell } from 'lucide-react';
+import { Search, CheckCheck, ShoppingCart, Plus, Minus, X, Trash2, Box, Camera, QrCode, RotateCcw, PackageCheck, ClipboardList, AlertCircle, Upload, Keyboard, Bell, Download, ImagePlus, FileText, Printer } from 'lucide-react';
 import { fetchApi } from '@/services/api';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -18,6 +18,30 @@ import { Scanner } from '@yudiel/react-qr-scanner';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+
+// Hàm bỏ dấu tiếng Việt để xuất PDF không bị lỗi font
+const removeVietnameseTones = (str: any) => {
+  if (!str) return '';
+  str = String(str);
+  str = str.replace(/à|á|ạ|ả|ã|â|ầ|ấ|ậ|ẩ|ẫ|ă|ằ|ắ|ặ|ẳ|ẵ/g, "a");
+  str = str.replace(/è|é|ẹ|ẻ|ẽ|ê|ề|ế|ệ|ể|ễ/g, "e");
+  str = str.replace(/ì|í|ị|ỉ|ĩ/g, "i");
+  str = str.replace(/ò|ó|ọ|ỏ|õ|ô|ồ|ố|ộ|ổ|ỗ|ơ|ờ|ớ|ợ|ở|ỡ/g, "o");
+  str = str.replace(/ù|ú|ụ|ủ|ũ|ư|ừ|ứ|ự|ử|ữ/g, "u");
+  str = str.replace(/ỳ|ý|ỵ|ỷ|ỹ/g, "y");
+  str = str.replace(/đ/g, "d");
+  str = str.replace(/À|Á|Ạ|Ả|Ã|Â|Ầ|Ấ|Ậ|Ẩ|Ẫ|Ă|Ằ|Ắ|Ặ|Ẳ|Ẵ/g, "A");
+  str = str.replace(/È|É|Ẹ|Ẻ|Ẽ|Ê|Ề|Ế|Ệ|Ể|Ễ/g, "E");
+  str = str.replace(/Ì|Í|Ị|Ỉ|Ĩ/g, "I");
+  str = str.replace(/Ò|Ó|Ọ|Ỏ|Õ|Ô|Ồ|Ố|Ộ|Ổ|Ỗ|Ơ|Ờ|Ớ|Ợ|Ở|Ỡ/g, "O");
+  str = str.replace(/Ù|Ú|Ụ|Ủ|Ũ|Ư|Ừ|Ứ|Ự|Ử|Ữ/g, "U");
+  str = str.replace(/Ỳ|Ý|Ỵ|Ỷ|Ỹ/g, "Y");
+  str = str.replace(/Đ/g, "D");
+  return str;
+};
 
 const STATUS_MAP = {
   CHO_DUYET: 'Chờ duyệt',
@@ -103,6 +127,16 @@ export default function RequestsPage() {
 
   const [scanOpen, setScanOpen] = useState(false);
   const [manualCode, setManualCode] = useState('');
+
+  // Trạng thái chọn hàng để xuất PDF
+  const [selectedReqIds, setSelectedReqIds] = useState<string[]>([]);
+
+  // Trạng thái Biểu mẫu xem trước & in
+  const [previewReq, setPreviewReq] = useState<any | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  // Trạng thái ảnh chứng minh cho NV Kho khi cấp phát
+  const [proofImage, setProofImage] = useState<string | null>(null);
 
   const equipment = store.getEquipment();
   const departments = store.getDepartments();
@@ -267,6 +301,7 @@ export default function RequestsPage() {
   const startProcessing = async (maPhieu: string) => {
     // Cả NV Kho và Trưởng khoa đều có thể xem, nhưng chỉ ql Kho mới có thể chỉnh sửa các yêu cầu đang chờ duyệt
     setLoading(true);
+    setProofImage(null); // Reset ảnh chứng minh mỗi lần mở phiếu mới
     try {
       const result = await apiScanRequest(maPhieu);
       if (result.success) {
@@ -311,7 +346,8 @@ export default function RequestsPage() {
       } else {
         result = await apiProcessRequestItems(processingRequest.maPhieu, {
           items: processItems,
-          ghiChu: processGhiChu
+          ghiChu: processGhiChu,
+          proofImage: proofImage
         });
       }
 
@@ -418,6 +454,314 @@ export default function RequestsPage() {
     }
   };
 
+  const handlePrintForm = (elementId: string, title: string) => {
+    const printContent = document.getElementById(elementId);
+    if (!printContent) return;
+    const printWindow = window.open('', '_blank', 'width=950,height=800');
+    if (!printWindow) {
+      window.print();
+      return;
+    }
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>${title}</title>
+          <style>
+            @page { size: A4; margin: 15mm; }
+            body {
+              font-family: 'Times New Roman', Times, serif;
+              font-size: 13pt;
+              line-height: 1.4;
+              color: #000;
+              margin: 0;
+              padding: 10px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin: 15px 0;
+            }
+            th, td {
+              border: 1px solid #000;
+              padding: 6px 8px;
+              text-align: left;
+              font-size: 11pt;
+            }
+            th {
+              background-color: #f0f0f0;
+              text-align: center;
+              font-weight: bold;
+            }
+            .text-center { text-align: center; }
+            .text-right { text-align: right; }
+            .font-bold { font-weight: bold; }
+            .italic { font-style: italic; }
+            .uppercase { text-transform: uppercase; }
+            .header-grid {
+              display: flex;
+              justify-content: space-between;
+              margin-bottom: 20px;
+            }
+            .title-area {
+              text-align: center;
+              margin: 18px 0;
+            }
+            .signatures {
+              display: flex;
+              justify-content: space-between;
+              margin-top: 30px;
+              page-break-inside: avoid;
+            }
+            .sig-box {
+              text-align: center;
+              width: 32%;
+            }
+            .sig-space {
+              height: 70px;
+            }
+          </style>
+        </head>
+        <body>
+          ${printContent.innerHTML}
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+      printWindow.close();
+    }, 250);
+  };
+
+  const exportSingleRequestPDF = (r: any) => {
+    if (!r) return;
+    try {
+      const doc = new jsPDF();
+      const khoa = departments.find(k => k.maKhoa === r.maKhoa);
+      const requester = users.find(u => u.maNguoiDung === r.maNguoiYeuCau);
+      const tenNguoiYeuCau = requester?.hoTen || r.maNguoiYeuCau || 'Trợ lý khoa';
+      const tenKhoa = khoa?.tenKhoa || r.maKhoa;
+
+      doc.setFontSize(10);
+      doc.text(removeVietnameseTones('BO Y TE - BENH VIEN MEDEQUIP'), 14, 15);
+      doc.text(removeVietnameseTones(`Khoa/Phong: ${tenKhoa}`), 14, 21);
+      doc.text(removeVietnameseTones(`Ma phieu: ${r.maPhieu}`), 14, 27);
+
+      doc.text(removeVietnameseTones('CONG HOA XA HOI CHU NGHIA VIET NAM'), 196, 15, { align: 'right' });
+      doc.text(removeVietnameseTones('Doc lap - Tu do - Hanh phuc'), 196, 21, { align: 'right' });
+      doc.line(135, 23, 196, 23);
+
+      doc.setFontSize(15);
+      doc.setFont('helvetica', 'bold');
+      doc.text(removeVietnameseTones('GIAY DE NGHI CAP PHAT THIET BI Y TE'), 105, 38, { align: 'center' });
+
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'italic');
+      doc.text(removeVietnameseTones('(Dung cho Tro ly / Khoa phong de nghi cap phat thiet bi y te)'), 105, 44, { align: 'center' });
+
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text(removeVietnameseTones(`Don vi de nghi: ${tenKhoa}`), 14, 54);
+      doc.text(removeVietnameseTones(`Nguoi de nghi (Tro ly): ${tenNguoiYeuCau}`), 14, 61);
+      doc.text(removeVietnameseTones(`Ngay yeu cau: ${new Date(r.ngayTao).toLocaleString('vi-VN')}`), 14, 68);
+      doc.text(removeVietnameseTones(`Trang thai: ${STATUS_MAP[r.trangThai as keyof typeof STATUS_MAP] || r.trangThai}`), 14, 75);
+      doc.text(removeVietnameseTones(`Ly do / Muc dich: ${r.lyDo || 'Khong co ghi chu'}`), 14, 82);
+
+      const tableColumn = ["STT", "Ma TB", "Ten Thiet Bi Y Te", "DVT", "SL De Nghi", "Ghi Chu"].map(removeVietnameseTones);
+      const tableRows: any[] = [];
+
+      if (r.items && r.items.length > 0) {
+        r.items.forEach((item: any, i: number) => {
+          tableRows.push([
+            (i + 1).toString(),
+            item.maThietBi,
+            removeVietnameseTones(item.tenThietBi || item.maThietBi),
+            removeVietnameseTones(item.donVi || item.donViTinh || 'Cai'),
+            item.soLuongCoSo ? item.soLuongCoSo.toString() : (item.soLuong?.toString() || '1'),
+            removeVietnameseTones(item.ghiChu || '')
+          ]);
+        });
+      } else {
+        tableRows.push(["1", r.maThietBi || '', removeVietnameseTones(r.tenThietBi || ''), 'Cai', r.soLuongYeuCau?.toString() || '1', '']);
+      }
+
+      autoTable(doc, {
+        head: [tableColumn],
+        body: tableRows,
+        startY: 88,
+        styles: { fontSize: 9, cellPadding: 3 },
+        headStyles: { fillColor: [41, 128, 185], textColor: 255, halign: 'center' },
+        columnStyles: {
+          0: { halign: 'center', cellWidth: 12 },
+          1: { halign: 'center', cellWidth: 25 },
+          2: { cellWidth: 60 },
+          3: { halign: 'center', cellWidth: 18 },
+          4: { halign: 'center', cellWidth: 22 },
+          5: { cellWidth: 'auto' }
+        }
+      });
+
+      const finalY = (doc as any).lastAutoTable.finalY + 14;
+      const dateFormatted = new Date(r.ngayTao);
+      const day = dateFormatted.getDate();
+      const month = dateFormatted.getMonth() + 1;
+      const year = dateFormatted.getFullYear();
+
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'italic');
+      doc.text(removeVietnameseTones(`Ngay ${day} thang ${month} nam ${year}`), 196, finalY, { align: 'right' });
+
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
+      doc.text(removeVietnameseTones('NGUOI DE NGHI'), 35, finalY + 8, { align: 'center' });
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(8);
+      doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 35, finalY + 13, { align: 'center' });
+
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
+      doc.text(removeVietnameseTones('TRUONG KHOA DUYET'), 105, finalY + 8, { align: 'center' });
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(8);
+      doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 105, finalY + 13, { align: 'center' });
+
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
+      doc.text(removeVietnameseTones('KHO CAP PHAT'), 175, finalY + 8, { align: 'center' });
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(8);
+      doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 175, finalY + 13, { align: 'center' });
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.text(removeVietnameseTones(tenNguoiYeuCau), 35, finalY + 36, { align: 'center' });
+
+      doc.save(`bieu_mau_yeu_cau_${r.maPhieu}.pdf`);
+      toast({ title: 'Thành công', description: `Đã xuất PDF biểu mẫu phiếu ${r.maPhieu}` });
+    } catch (err: any) {
+      console.error(err);
+      toast({ title: 'Lỗi', description: `Không thể xuất PDF: ${err.message}`, variant: 'destructive' });
+    }
+  };
+
+  const handleExportPDF = () => {
+    try {
+      const toExport = reqFiltered.filter(r => selectedReqIds.includes(r.maPhieu));
+      if (toExport.length === 0) {
+        toast({ title: 'Chưa chọn', description: 'Vui lòng tick chọn ít nhất 1 phiếu để xuất.', variant: 'destructive' });
+        return;
+      }
+      const doc = new jsPDF();
+      
+      toExport.forEach((r, index) => {
+        if (index > 0) doc.addPage();
+        
+        const khoa = departments.find(k => k.maKhoa === r.maKhoa);
+        const requester = users.find(u => u.maNguoiDung === r.maNguoiYeuCau);
+        const tenNguoiYeuCau = requester?.hoTen || r.maNguoiYeuCau || 'Trợ lý khoa';
+        const tenKhoa = khoa?.tenKhoa || r.maKhoa;
+        
+        doc.setFontSize(10);
+        doc.text(removeVietnameseTones('BO Y TE - BENH VIEN MEDEQUIP'), 14, 15);
+        doc.text(removeVietnameseTones(`Khoa/Phong: ${tenKhoa}`), 14, 21);
+        doc.text(removeVietnameseTones(`Ma phieu: ${r.maPhieu}`), 14, 27);
+        
+        doc.text(removeVietnameseTones('CONG HOA XA HOI CHU NGHIA VIET NAM'), 196, 15, { align: 'right' });
+        doc.text(removeVietnameseTones('Doc lap - Tu do - Hanh phuc'), 196, 21, { align: 'right' });
+        doc.line(135, 23, 196, 23);
+
+        doc.setFontSize(15);
+        doc.setFont('helvetica', 'bold');
+        doc.text(removeVietnameseTones('GIAY DE NGHI CAP PHAT THIET BI Y TE'), 105, 38, { align: 'center' });
+        
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'normal');
+        doc.text(removeVietnameseTones(`Don vi: ${tenKhoa}`), 14, 52);
+        doc.text(removeVietnameseTones(`Nguoi de nghi: ${tenNguoiYeuCau}`), 14, 59);
+        doc.text(removeVietnameseTones(`Ngay yeu cau: ${new Date(r.ngayTao).toLocaleString('vi-VN')}`), 14, 66);
+        doc.text(removeVietnameseTones(`Ly do: ${r.lyDo || '---'}`), 14, 73);
+
+        const tableColumn = ["STT", "Ma TB", "Ten Thiet Bi Y Te", "DVT", "SL De Nghi", "Ghi Chu"].map(removeVietnameseTones);
+        const tableRows: any[] = [];
+        
+        if (r.items && r.items.length > 0) {
+          r.items.forEach((item, i) => {
+            tableRows.push([
+              (i + 1).toString(),
+              item.maThietBi,
+              removeVietnameseTones(item.tenThietBi || item.maThietBi),
+              removeVietnameseTones(item.donVi || item.donViTinh || 'Cai'),
+              item.soLuongCoSo ? item.soLuongCoSo.toString() : (item.soLuong?.toString() || '1'),
+              removeVietnameseTones(item.ghiChu || '')
+            ]);
+          });
+        } else {
+          tableRows.push(["1", r.maThietBi || '', removeVietnameseTones(r.tenThietBi || ''), 'Cai', r.soLuongYeuCau?.toString() || '1', '']);
+        }
+
+        autoTable(doc, {
+          head: [tableColumn],
+          body: tableRows,
+          startY: 80,
+          styles: { fontSize: 9, cellPadding: 3 },
+          headStyles: { fillColor: [41, 128, 185], textColor: 255, halign: 'center' },
+          columnStyles: {
+            0: { halign: 'center', cellWidth: 12 },
+            1: { halign: 'center', cellWidth: 25 },
+            2: { cellWidth: 60 },
+            3: { halign: 'center', cellWidth: 18 },
+            4: { halign: 'center', cellWidth: 22 },
+            5: { cellWidth: 'auto' }
+          }
+        });
+
+        const finalY = (doc as any).lastAutoTable.finalY + 14;
+        const dateFormatted = new Date(r.ngayTao);
+        const day = dateFormatted.getDate();
+        const month = dateFormatted.getMonth() + 1;
+        const year = dateFormatted.getFullYear();
+
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'italic');
+        doc.text(removeVietnameseTones(`Ngay ${day} thang ${month} nam ${year}`), 196, finalY, { align: 'right' });
+        
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text(removeVietnameseTones('NGUOI DE NGHI'), 35, finalY + 8, { align: 'center' });
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 35, finalY + 13, { align: 'center' });
+
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text(removeVietnameseTones('TRUONG KHOA DUYET'), 105, finalY + 8, { align: 'center' });
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 105, finalY + 13, { align: 'center' });
+
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text(removeVietnameseTones('KHO CAP PHAT'), 175, finalY + 8, { align: 'center' });
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 175, finalY + 13, { align: 'center' });
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text(removeVietnameseTones(tenNguoiYeuCau), 35, finalY + 36, { align: 'center' });
+      });
+
+      doc.save('bieu_mau_cap_phat_thiet_bi.pdf');
+      toast({ title: 'Thành công', description: `Đã xuất PDF biểu mẫu cho ${toExport.length} phiếu.` });
+      setSelectedReqIds([]);
+    } catch (err: any) {
+      console.error("Lỗi khi xuất PDF:", err);
+      toast({ title: 'Lỗi', description: `Không thể xuất PDF: ${err.message}`, variant: 'destructive' });
+    }
+  };
+
   return (
     <div className="space-y-4 animate-fade-in relative min-h-[80vh]">
       <Tabs defaultValue={isTroLy ? "catalog" : "history"} className="w-full">
@@ -508,25 +852,54 @@ export default function RequestsPage() {
         )}
 
         <TabsContent value="history" className="mt-0">
-          <div className="flex gap-3 mb-4 flex-wrap">
+          <div className="flex gap-3 mb-4 flex-wrap items-center">
             <div className="relative max-w-sm w-full">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input placeholder="Tìm mã phiếu..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" />
             </div>
-            {isNvkho || isQlKho ? (
+            {(isNvkho || isQlKho) && (
               <SearchableSelect
                 options={[{ value: 'all', label: 'Tất cả khoa' }, ...departments.map(k => ({ value: k.maKhoa, label: k.tenKhoa }))]}
                 value={filterDept}
                 onValueChange={setFilterDept}
                 placeholder="Lọc theo khoa"
               />
-            ) : null}
+            )}
+            {(isNvkho || isTroLy || isTruongKhoa) && (
+              <Button
+                variant="outline"
+                onClick={handleExportPDF}
+                className={cn(
+                  "border-indigo-200 text-indigo-600 hover:bg-indigo-50",
+                  selectedReqIds.length === 0 && "opacity-50"
+                )}
+              >
+                <Download className="w-4 h-4 mr-2" />
+                Xuất Biểu Mẫu PDF {selectedReqIds.length > 0 && `(${selectedReqIds.length})`}
+              </Button>
+            )}
           </div>
 
           <div className="border rounded-xl bg-card overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead><tr className="border-b bg-muted/50">
+                  {(isNvkho || isTroLy || isTruongKhoa) && (
+                    <th className="p-3 w-10 text-center">
+                      <Checkbox
+                        checked={reqFiltered.length > 0 && reqFiltered.every(r => selectedReqIds.includes(r.maPhieu))}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            const newIds = new Set(selectedReqIds);
+                            reqFiltered.forEach(r => newIds.add(r.maPhieu));
+                            setSelectedReqIds(Array.from(newIds));
+                          } else {
+                            setSelectedReqIds(selectedReqIds.filter(id => !reqFiltered.some(r => r.maPhieu === id)));
+                          }
+                        }}
+                      />
+                    </th>
+                  )}
                   <th className="text-left p-3 font-medium text-muted-foreground w-1/6">Mã YC</th>
                   <th className="text-left p-3 font-medium text-muted-foreground">Khoa</th>
                   <th className="text-left p-3 font-medium text-muted-foreground">Danh mục yêu cầu</th>
@@ -540,9 +913,21 @@ export default function RequestsPage() {
                     const khoa = departments.find(k => k.maKhoa === r.maKhoa);
                     const itemCount = r.items?.length || 1;
                     const mainItem = r.items?.[0] || { tenThietBi: r.tenThietBi || r.maThietBi };
+                    const isSelected = selectedReqIds.includes(r.maPhieu);
 
                     return (
-                      <tr key={r.maPhieu} className="border-b hover:bg-primary/5 transition-colors cursor-pointer group" onClick={() => startProcessing(r.maPhieu)}>
+                      <tr key={r.maPhieu} className={cn("border-b hover:bg-primary/5 transition-colors cursor-pointer group", isSelected && "bg-indigo-50/50")} onClick={() => startProcessing(r.maPhieu)}>
+                        {(isNvkho || isTroLy || isTruongKhoa) && (
+                          <td className="p-3" onClick={e => e.stopPropagation()}>
+                            <Checkbox
+                              checked={isSelected}
+                              onCheckedChange={(checked) => {
+                                if (checked) setSelectedReqIds([...selectedReqIds, r.maPhieu]);
+                                else setSelectedReqIds(selectedReqIds.filter(id => id !== r.maPhieu));
+                              }}
+                            />
+                          </td>
+                        )}
                         <td className="p-3 font-mono text-xs font-bold group-hover:text-primary transition-colors">{r.maPhieu}</td>
                         <td className="p-3">{khoa?.tenKhoa || r.maKhoa}</td>
                         <td className="p-3">
@@ -562,6 +947,20 @@ export default function RequestsPage() {
                         </td>
                         <td className="p-3 text-center text-xs text-muted-foreground">{new Date(r.ngayTao).toLocaleString('vi-VN')}</td>
                         <td className="p-3 text-right">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-indigo-200 text-indigo-600 hover:bg-indigo-50 text-xs h-8 mr-1 inline-flex items-center gap-1"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPreviewReq(r);
+                              setPreviewOpen(true);
+                            }}
+                            title="Xem biểu mẫu đề nghị cấp phát"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            <span>Biểu mẫu</span>
+                          </Button>
                           {isTruongKhoa && (r.trangThai === 'CHO_TRUONG_KHOA_DUYET' || r.trangThai === 'CHO_DUYET') && (
                             <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs h-8 mr-2" onClick={(e) => { e.stopPropagation(); startProcessing(r.maPhieu); }}>
                               Xử lý duyệt
@@ -876,20 +1275,84 @@ export default function RequestsPage() {
                       className="min-h-[60px] text-sm"
                     />
                   </div>
+                  
+                  {/* Hiển thị ảnh chứng minh nếu đã có */}
+                  {processingRequest.anhMinhChung && (
+                    <div className="space-y-2 mt-4 p-4 border rounded-xl bg-yellow-50/50">
+                      <Label className="text-sm font-bold text-yellow-800">Ảnh chứng minh bàn giao thiết bị</Label>
+                      <div className="mt-2">
+                        <img src={processingRequest.anhMinhChung} alt="Ảnh chứng minh" className="w-32 h-32 object-cover rounded-lg border shadow-sm" />
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              <DialogFooter className="p-4 border-t bg-muted/20">
-                <Button variant="ghost" onClick={() => setAllocateOpen(false)} disabled={loading}>Đóng</Button>
+              {/* Ảnh chứng minh bắt buộc cho NV Kho khi cấp phát */}
+              {isNvkho && processingRequest.trangThai === 'DA_QL_KHO_DUYET' && (
+                <div className="mx-6 mb-4 p-4 border-2 border-dashed rounded-xl space-y-3"
+                  style={{ borderColor: proofImage ? 'hsl(160,60%,45%)' : 'hsl(0,84%,60%)' }}>
+                  <Label className="text-sm font-bold flex items-center gap-2">
+                    <ImagePlus className="w-4 h-4 text-primary" />
+                    Ảnh chứng minh bàn giao thiết bị
+                    <span className="text-destructive text-xs font-normal">(Bắt buộc trước khi hoàn thành cấp phát)</span>
+                  </Label>
+                  {proofImage ? (
+                    <div className="flex items-center gap-3">
+                      <img src={proofImage} alt="Proof" className="w-24 h-24 object-cover rounded-lg border shadow-sm" />
+                      <div className="flex flex-col gap-2">
+                        <span className="text-xs text-success font-medium">✓ Đã tải ảnh chứng minh</span>
+                        <Button size="sm" variant="outline" className="text-xs h-7"
+                          onClick={() => setProofImage(null)}>Xóa ảnh</Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <label className="flex flex-col items-center gap-2 cursor-pointer py-4 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
+                      <Upload className="w-8 h-8 text-muted-foreground" />
+                      <span className="text-sm text-muted-foreground">Click để tải ảnh chứng minh bàn giao lên</span>
+                      <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = (ev) => setProofImage(ev.target?.result as string);
+                        reader.readAsDataURL(file);
+                      }} />
+                    </label>
+                  )}
+                </div>
+              )}
+
+              <DialogFooter className="p-4 border-t bg-muted/20 flex flex-row items-center justify-between">
+                <div className="flex gap-2">
+                  <Button variant="ghost" onClick={() => setAllocateOpen(false)} disabled={loading}>Đóng</Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setPreviewReq(processingRequest);
+                      setPreviewOpen(true);
+                    }}
+                    className="border-indigo-200 text-indigo-600 hover:bg-indigo-50"
+                  >
+                    <FileText className="w-4 h-4 mr-1.5" /> Xem Biểu Mẫu
+                  </Button>
+                </div>
                 {((isTruongKhoa && (processingRequest.trangThai === 'CHO_TRUONG_KHOA_DUYET' || processingRequest.trangThai === 'CHO_DUYET')) ||
                   (isQlKho && processingRequest.trangThai === 'CHO_QL_KHO_DUYET') ||
                   (isNvkho && processingRequest.trangThai === 'DA_QL_KHO_DUYET')) && (
                   <Button
                     onClick={submitProcessItems}
-                    disabled={loading || (isNvkho && processItems.some(i => i.approved && (processingRequest.items?.find((it: any) => it.maThietBi === i.maThietBi)?.tonKho || 0) < (processingRequest.items?.find((it: any) => it.maThietBi === i.maThietBi)?.soLuong || 0)))}
+                    disabled={loading
+                      || (isNvkho && processingRequest.trangThai === 'DA_QL_KHO_DUYET' && !proofImage)
+                      || (isNvkho && processItems.some(i => i.approved && (processingRequest.items?.find((it: any) => it.maThietBi === i.maThietBi)?.tonKho || 0) < (processingRequest.items?.find((it: any) => it.maThietBi === i.maThietBi)?.soLuong || 0)))}
                     className="gradient-primary text-white font-bold min-w-[150px]"
+                    title={isNvkho && processingRequest.trangThai === 'DA_QL_KHO_DUYET' && !proofImage ? 'Bắt buộc tải ảnh chứng minh bàn giao trước khi hoàn thành cấp phát' : undefined}
                   >
-                    {loading ? 'Đang xử lý...' : 'Xác nhận xử lý'}
+                    {loading ? 'Đang xử lý...' : (
+                      isNvkho && processingRequest.trangThai === 'DA_QL_KHO_DUYET' && !proofImage
+                        ? 'Ảnh chứng minh chưa tải lên'
+                        : 'Xác nhận xử lý'
+                    )}
                   </Button>
                 )}
               </DialogFooter>
@@ -1111,6 +1574,174 @@ export default function RequestsPage() {
           <DialogFooter className="mt-2">
             <Button variant="outline" onClick={() => setDeleteConfirmId(null)}>Hủy</Button>
             <Button variant="destructive" onClick={handleDelete}>Xác nhận xóa</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL XEM TRƯỚC VÀ IN BIỂU MẪU ĐỀ NGHỊ CẤP PHÁT */}
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-4xl max-h-[92vh] flex flex-col p-0 overflow-hidden">
+          <DialogHeader className="p-4 border-b bg-card z-10 flex flex-row items-center justify-between">
+            <DialogTitle className="flex items-center gap-2 text-base font-bold text-foreground">
+              <FileText className="w-5 h-5 text-primary" />
+              Biểu Mẫu Phiếu Yêu Cầu Cấp Phát Thiết Bị Y Tế {previewReq?.maPhieu && `(${previewReq.maPhieu})`}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto p-6 bg-muted/20">
+            {previewReq && (() => {
+              const khoa = departments.find(k => k.maKhoa === previewReq.maKhoa);
+              const requester = users.find(u => u.maNguoiDung === previewReq.maNguoiYeuCau);
+              const tenNguoiYeuCau = requester?.hoTen || previewReq.maNguoiYeuCau || 'Trợ lý khoa';
+              const tenKhoa = khoa?.tenKhoa || previewReq.maKhoa;
+              const dateCreated = new Date(previewReq.ngayTao);
+              const day = dateCreated.getDate();
+              const month = dateCreated.getMonth() + 1;
+              const year = dateCreated.getFullYear();
+              const itemsList = previewReq.items && previewReq.items.length > 0 
+                ? previewReq.items 
+                : [{
+                    maThietBi: previewReq.maThietBi,
+                    tenThietBi: previewReq.tenThietBi || previewReq.maThietBi,
+                    soLuong: previewReq.soLuongYeuCau || 1,
+                    donVi: 'Cái',
+                    ghiChu: ''
+                  }];
+
+              return (
+                <div 
+                  id="request-form-content" 
+                  className="bg-white text-gray-900 p-8 rounded-lg shadow-sm border border-gray-200 mx-auto max-w-3xl font-serif text-[14px] leading-relaxed"
+                >
+                  {/* Tiêu đề & Quốc hiệu */}
+                  <div className="header-grid flex justify-between items-start border-b pb-4 mb-4">
+                    <div className="text-center w-5/12">
+                      <div className="font-bold uppercase text-[12px]">BỘ Y TẾ - BỆNH VIỆN MEDEQUIP</div>
+                      <div className="font-semibold text-[12px]">KHOA / PHÒNG: {tenKhoa}</div>
+                      <div className="text-[11px] text-gray-500 font-mono mt-1">Mã phiếu: {previewReq.maPhieu}</div>
+                    </div>
+                    <div className="text-center w-6/12">
+                      <div className="font-bold uppercase text-[12px]">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</div>
+                      <div className="font-bold text-[12px]">Độc lập - Tự do - Hạnh phúc</div>
+                      <div className="text-xs text-gray-400">---***---</div>
+                      <div className="italic text-[11px] text-gray-600 mt-1">
+                        Ngày {day} tháng {month} năm {year}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Tên văn bản */}
+                  <div className="title-area text-center my-6">
+                    <h2 className="text-xl font-bold uppercase tracking-wide text-gray-900 mb-1">
+                      GIẤY ĐỀ NGHỊ CẤP PHÁT THIẾT BỊ Y TẾ
+                    </h2>
+                    <p className="italic text-xs text-gray-600">
+                      (Dùng cho Trợ lý / Khoa phòng điều trị đề xuất trang thiết bị y tế)
+                    </p>
+                  </div>
+
+                  {/* Kính gửi & Thông tin người đề xuất */}
+                  <div className="space-y-2 mb-5 text-[13px]">
+                    <div className="italic text-center font-medium mb-3">
+                      Kính gửi: Ban Giám Đốc, Phòng Quản lý Trang thiết bị y tế & Quản lý Kho
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div><span className="font-semibold">Đơn vị đề nghị:</span> {tenKhoa}</div>
+                      <div><span className="font-semibold">Mã khoa:</span> {previewReq.maKhoa}</div>
+                      <div><span className="font-semibold">Người đề nghị (Trợ lý):</span> {tenNguoiYeuCau}</div>
+                      <div><span className="font-semibold">Thời gian tạo:</span> {dateCreated.toLocaleString('vi-VN')}</div>
+                      <div><span className="font-semibold">Trạng thái phiếu:</span> <span className="font-bold text-primary">{STATUS_MAP[previewReq.trangThai as keyof typeof STATUS_MAP] || previewReq.trangThai}</span></div>
+                    </div>
+                    <div className="mt-2">
+                      <span className="font-semibold">Mục đích / Lý do đề nghị cấp phát:</span>
+                      <p className="italic text-gray-700 mt-0.5 bg-gray-50 p-2 rounded border border-gray-100">
+                        {previewReq.lyDo || 'Đề nghị cấp phát phục vụ công tác khám chữa bệnh chuyên môn tại khoa.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Bảng danh sách thiết bị yêu cầu */}
+                  <div className="mb-6">
+                    <div className="font-semibold text-[13px] mb-2 uppercase tracking-wide">
+                      I. Danh mục thiết bị y tế đề nghị cấp phát:
+                    </div>
+                    <table className="w-full border-collapse border border-gray-400 text-[12px]">
+                      <thead>
+                        <tr className="bg-gray-100 font-bold text-center">
+                          <th className="border border-gray-400 p-2 w-10">STT</th>
+                          <th className="border border-gray-400 p-2 w-28">Mã thiết bị</th>
+                          <th className="border border-gray-400 p-2 text-left">Tên thiết bị y tế</th>
+                          <th className="border border-gray-400 p-2 w-20">ĐVT</th>
+                          <th className="border border-gray-400 p-2 w-24">SL Đề nghị</th>
+                          <th className="border border-gray-400 p-2 text-left">Ghi chú</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {itemsList.map((item: any, idx: number) => (
+                          <tr key={idx} className="hover:bg-gray-50">
+                            <td className="border border-gray-400 p-2 text-center">{idx + 1}</td>
+                            <td className="border border-gray-400 p-2 text-center font-mono font-medium">{item.maThietBi}</td>
+                            <td className="border border-gray-400 p-2 font-medium">{item.tenThietBi || item.maThietBi}</td>
+                            <td className="border border-gray-400 p-2 text-center">{item.donVi || item.donViTinh || 'Cái'}</td>
+                            <td className="border border-gray-400 p-2 text-center font-bold text-base text-primary">
+                              {item.soLuongCoSo || item.soLuong || 1}
+                            </td>
+                            <td className="border border-gray-400 p-2 text-gray-600">{item.ghiChu || '---'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Khối chữ ký 3 bên */}
+                  <div className="signatures mt-8 pt-4">
+                    <div className="text-right italic text-[11px] mb-4 text-gray-600">
+                      ........., Ngày ..... tháng ..... năm 20...
+                    </div>
+                    <div className="grid grid-cols-3 gap-4 text-center">
+                      <div className="sig-box">
+                        <div className="sig-title font-bold uppercase text-[12px]">NGƯỜI ĐỀ NGHỊ</div>
+                        <div className="sig-sub italic text-[11px] text-gray-500 mb-16">(Ký và ghi rõ họ tên)</div>
+                        <div className="sig-name font-bold text-[12px]">{tenNguoiYeuCau}</div>
+                      </div>
+                      <div className="sig-box">
+                        <div className="sig-title font-bold uppercase text-[12px]">TRƯỞNG KHOA PHÊ DUYỆT</div>
+                        <div className="sig-sub italic text-[11px] text-gray-500 mb-16">(Ký và ghi rõ họ tên)</div>
+                        <div className="sig-name font-bold text-[12px]"></div>
+                      </div>
+                      <div className="sig-box">
+                        <div className="sig-title font-bold uppercase text-[12px]">BỘ PHẬN KHO CẤP PHÁT</div>
+                        <div className="sig-sub italic text-[11px] text-gray-500 mb-16">(Ký và ghi rõ họ tên)</div>
+                        <div className="sig-name font-bold text-[12px]"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
+          <DialogFooter className="p-3 border-t bg-card flex flex-row items-center justify-between gap-2">
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => handlePrintForm('request-form-content', `Bieu_Mau_YCCF_${previewReq?.maPhieu}`)}
+                className="gap-1.5"
+              >
+                <Printer className="w-4 h-4 text-muted-foreground" />
+                In biểu mẫu
+              </Button>
+              <Button
+                onClick={() => exportSingleRequestPDF(previewReq)}
+                className="gradient-primary text-white gap-1.5"
+              >
+                <Download className="w-4 h-4" />
+                Tải file PDF
+              </Button>
+            </div>
+            <Button variant="ghost" onClick={() => setPreviewOpen(false)}>
+              Đóng
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

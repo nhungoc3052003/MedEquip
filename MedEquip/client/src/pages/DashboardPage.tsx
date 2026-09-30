@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { store } from '@/lib/store';
 import { ThietBi, ROLE_LABELS, LOAI_THIET_BI_COLORS, LOAI_THIET_BI_LABELS, TINH_TRANG_TRA_LABELS } from '@/types';
+import { getDueStatus } from './ReturnsPage';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -108,7 +109,7 @@ export default function DashboardPage() {
                     <tbody>
                       {đangMuonAllocations.map(a => {
                         const tb = equipment.find(e => e.maThietBi === a.maThietBi);
-                        const isOverdue = a.ngayDuKienTra && new Date(a.ngayDuKienTra) < new Date();
+                        const { isOverdue, diffDays, formattedDate } = getDueStatus(a.ngayDuKienTra);
                         return (
                           <tr key={a.maPhieu} className="border-b hover:bg-muted/30">
                             <td className="p-3 font-mono text-[10px]">{a.maPhieu}</td>
@@ -129,8 +130,8 @@ export default function DashboardPage() {
                             <td className="p-3 text-xs">{new Date(a.ngayCapPhat).toLocaleDateString('vi-VN')}</td>
                             <td className="p-3 text-xs">
                               <span className={isOverdue ? "text-destructive font-bold" : ""}>
-                                {a.ngayDuKienTra ? new Date(a.ngayDuKienTra).toLocaleDateString('vi-VN') : '—'}
-                                {isOverdue && " (Quá hạn)"}
+                                {a.ngayDuKienTra ? formattedDate : '—'}
+                                {isOverdue && ` (Quá hạn ${diffDays} ngày)`}
                               </span>
                             </td>
                             <td className="p-3 text-right">

@@ -14,7 +14,8 @@ function mapRequest(row) {
     ngayDuyet: row.ngay_duyet,
     nguoiDuyet: row.nguoi_duyet,
     lyDoTuChoi: row.ly_do_tu_choi || "",
-    maPhieuCapPhatCu: row.ma_phieu_cap_phat_cu || null
+    maPhieuCapPhatCu: row.ma_phieu_cap_phat_cu || null,
+    anhMinhChung: row.anh_minh_chung || null
   };
 }
 
@@ -279,7 +280,7 @@ export async function processRequestItems(req, res) {
   try {
     await conn.beginTransaction();
     const { id } = req.params;
-    const { items, ghiChu } = req.body; // items: [{maThietBi, approved, lyDo}]
+    const { items, ghiChu, proofImage } = req.body; // items: [{maThietBi, approved, lyDo}]
 
     const [reqRows] = await conn.query("SELECT * FROM phieu_yeu_cau WHERE ma_phieu = ?", [id]);
     if (reqRows.length === 0) {
@@ -365,7 +366,7 @@ export async function processRequestItems(req, res) {
         }
       }
 
-      await conn.query("UPDATE phieu_yeu_cau SET trang_thai = 'DA_CAP_PHAT', ma_nv_kho_thuc_hien = ? WHERE ma_phieu = ?", [req.user.userId, id]);
+      await conn.query("UPDATE phieu_yeu_cau SET trang_thai = 'DA_CAP_PHAT', ma_nv_kho_thuc_hien = ?, anh_minh_chung = ? WHERE ma_phieu = ?", [req.user.userId, proofImage || null, id]);
     } else {
       await conn.query("UPDATE phieu_yeu_cau SET trang_thai = 'TU_CHOI', ma_nv_kho_thuc_hien = ? WHERE ma_phieu = ?", [req.user.userId, id]);
     }

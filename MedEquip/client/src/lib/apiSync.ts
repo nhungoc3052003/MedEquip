@@ -258,7 +258,7 @@ export async function apiScanRequest(maPhieu: string) {
   return fetchApi<any>(`/requests/${maPhieu}/scan`);
 }
 
-export async function apiProcessRequestItems(maPhieu: string, data: { items: { maThietBi: string; approved: boolean; lyDo?: string }[]; ghiChu?: string }) {
+export async function apiProcessRequestItems(maPhieu: string, data: { items: { maThietBi: string; approved: boolean; lyDo?: string }[]; ghiChu?: string; proofImage?: string | null }) {
   if (isMockMode()) {
     // Mock implementation for processing items
     const requests = store.getRequests();
@@ -268,6 +268,7 @@ export async function apiProcessRequestItems(maPhieu: string, data: { items: { m
     const approvedCount = data.items.filter(i => i.approved).length;
     if (approvedCount > 0) {
       requests[reqIndex].trangThai = 'DA_CAP_PHAT';
+      requests[reqIndex].anhMinhChung = data.proofImage || undefined;
       // In mock mode, we'd need to update inventory here too.
     } else {
       requests[reqIndex].trangThai = 'TU_CHOI';

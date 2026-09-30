@@ -1,8 +1,12 @@
 import { pool } from "../config/db.js";
+import { checkAndSendDueNotifications, checkAndSendDueNotificationsThrottled } from "../services/dueNotificationService.js";
 
 export async function getUserNotifications(req, res) {
   try {
     const userId = req.query.userId || req.user.userId;
+    // Tự động kiểm tra và gửi thông báo đến hạn / quá hạn (được throttle tối đa 1 lần/phút)
+    await checkAndSendDueNotificationsThrottled();
+
     const [rows] = await pool.query(
       "SELECT * FROM thong_bao WHERE nguoi_nhan = ? ORDER BY ngay_tao DESC",
       [userId]
@@ -38,5 +42,14 @@ export async function markAllAsRead(req, res) {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, message: "Lỗi máy chủ." });
+  }
+}
+
+export async function triggerCheckDueNotifications(req, res) {
+  try {
+    const result = await checkAndSendDueNotifications();
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Lỗi kiểm tra thông báo: " + err.message });
   }
 }

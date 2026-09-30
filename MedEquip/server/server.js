@@ -17,6 +17,7 @@ import damageReportRoutes from "./routes/damageReports.js";
 import notificationRoutes from "./routes/notifications.js";
 import reportRoutes from "./routes/reports.js";
 import returnRoutes from "./routes/returns.js";
+import { checkAndSendDueNotifications } from "./services/dueNotificationService.js";
 
 dotenv.config();
 
@@ -85,4 +86,15 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 MedEquip API v4 running on http://0.0.0.0:${PORT}`);
   console.log(`📋 API health check: http://localhost:${PORT}/api/test-db`);
+
+  // Tự động kiểm tra và gửi thông báo hạn trả thiết bị sau 3s khi khởi động
+  setTimeout(async () => {
+    console.log("[DueChecker] Running initial due/overdue notification check...");
+    await checkAndSendDueNotifications();
+  }, 3000);
+
+  // Tự động kiểm tra định kỳ mỗi 30 phút
+  setInterval(async () => {
+    await checkAndSendDueNotifications();
+  }, 30 * 60 * 1000);
 });

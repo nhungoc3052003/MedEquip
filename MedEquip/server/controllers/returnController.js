@@ -10,9 +10,14 @@ function mapReturn(row, details = []) {
     trangThai: row.trang_thai,
     ghiChu: row.ghi_chu || "",
     qrData: row.qr_data || "",
+    anhMinhChung: row.anh_minh_chung || null,
     chiTiet: details.map(d => {
       let meta = {};
       try { if (d.anh_chung_minh && d.anh_chung_minh.startsWith('{')) meta = JSON.parse(d.anh_chung_minh); } catch (e) { }
+      let detailStatus = d.trang_thai || "CHO_DUYET";
+      if (row.trang_thai === 'DA_TRA' && detailStatus !== 'TU_CHOI') {
+        detailStatus = 'DA_TRA';
+      }
       return {
         maPhieuCapPhat: meta.maPhieuCapPhat || row.ma_phieu_cap_phat,
         maThietBi: d.ma_thiet_bi,
@@ -23,7 +28,7 @@ function mapReturn(row, details = []) {
         donViCoSo: d.don_vi_co_so,
         tinhTrangKhiTra: d.tinh_trang_khi_tra,
         anhMinhChung: meta.anhMinhChung || null,
-        trangThai: d.trang_thai || "CHO_DUYET",
+        trangThai: detailStatus,
         lyDoTuChoi: d.ly_do_tu_choi || ""
       };
     })
@@ -199,7 +204,7 @@ export async function confirmReturn(req, res) {
   try {
     await conn.beginTransaction();
     const { id } = req.params;
-    const { approved, lyDo } = req.body;
+    const { approved, lyDo, proofImage } = req.body;
 
     const [rows] = await conn.query("SELECT * FROM phieu_tra_thiet_bi WHERE ma_phieu_tra = ?", [id]);
     if (rows.length === 0) {
@@ -209,7 +214,14 @@ export async function confirmReturn(req, res) {
     const phieu = rows[0];
 
     const newStatus = approved ? "DA_TRA" : "TU_CHOI";
-    await conn.query("UPDATE phieu_tra_thiet_bi SET trang_thai = ? WHERE id = ?", [newStatus, phieu.id]);
+    await conn.query("UPDATE phieu_tra_thiet_bi SET trang_thai = ?, anh_minh_chung = ? WHERE id = ?", [newStatus, proofImage || null, phieu.id]);
+
+    if (approved) {
+      // Cập nhật trạng thái các chi tiết thiết bị không bị từ chối thành DA_TRA
+      await conn.query("UPDATE chi_tiet_phieu_tra SET trang_thai = 'DA_TRA' WHERE ma_phieu_tra = ? AND trang_thai != 'TU_CHOI'", [phieu.id]);
+    } else {
+      await conn.query("UPDATE chi_tiet_phieu_tra SET trang_thai = 'TU_CHOI', ly_do_tu_choi = ? WHERE ma_phieu_tra = ?", [lyDo || "Từ chối phiếu", phieu.id]);
+    }
 
     // Lấy chi tiết phiếu trả mà không bị từ chối
     const [details] = await conn.query("SELECT * FROM chi_tiet_phieu_tra WHERE ma_phieu_tra = ? AND trang_thai != 'TU_CHOI'", [phieu.id]);
@@ -586,11 +598,11 @@ export async function remindOverdue(req, res) {
         const [allocs] = await conn.query("SELECT ma_khoa FROM phieu_cap_phat WHERE ma_phieu = ?", [item.maPhieuCapPhat]);
         if (allocs.length > 0) {
           const maKhoa = allocs[0].ma_khoa;
-          // Tìm trợ lý của khoa
-          const [troLy] = await conn.query("SELECT ma_nguoi_dung FROM nguoi_dung WHERE vai_tro = 'TRO_LY' AND ma_khoa = ?", [maKhoa]);
-          for (const tl of troLy) {
+          // Tìm trợ lý và trưởng khoa của khoa
+          const [recipients] = await conn.query("SELECT ma_nguoi_dung FROM nguoi_dung WHERE vai_tro IN ('TRO_LY', 'TRUONG_KHOA') AND ma_khoa = ?", [maKhoa]);
+          for (const rec of recipients) {
             await sendNotification(
-              tl.ma_nguoi_dung,
+              rec.ma_nguoi_dung,
               "Cảnh báo quá hạn trả thiết bị",
               `Thiết bị ${item.tenThietBi} (Phiếu ${item.maPhieuCapPhat}) đã quá hạn trả. Vui lòng lập phiếu trả hoặc gia hạn ngay.`,
               "warning"
