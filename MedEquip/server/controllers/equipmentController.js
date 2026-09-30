@@ -14,7 +14,11 @@ function mapEquipment(row) {
     maNhaCungCap: row.ma_nha_cung_cap || "",
     hinhAnh: row.hinh_anh || "",
     trangThai: !!row.trang_thai,
-    ngayTao: row.ngay_tao
+    ngayTao: row.ngay_tao,
+    chuKyBaoTri: row.chu_ky_bao_tri || null,
+    ngayBaoTriGanNhat: row.ngay_bao_tri_gan_nhat || null,
+    ngayBaoTriTiepTheo: row.ngay_bao_tri_tiep_theo || null,
+    trangThaiBaoTri: row.trang_thai_bao_tri || 'BINH_THUONG'
   };
 }
 

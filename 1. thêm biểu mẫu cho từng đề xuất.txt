@@ -1,0 +1,15 @@
+1. thêm biểu mẫu cho từng đề xuất 
+2. thiết lập quá hạn ngày số lượng cụ thể =>ok
+3. Mỗi thiết bị phải có thời gian bảo trì, tự động báo bảo trì ( mỗi thiết bị nhập kho phải có lịch bảo trì)
+mỗi sp găn mốc bảo trì 
+4. đề xuất chuyển thiết bị cho khoa khác cần, đề xuất trả lại kho
+TL KHOA: dề xuất nhập/chuyển/mượn(mỗi thiết bị găn 1 khoa )
+5. Mỗi thiết bị phải có mã sp, nếu khi QC mã thì sẽ hiện thên khoa gắn mượn thiết bị hoặc ở kho
+khi mượn thì nvkho sẽ gắn mã sp cho khoa nào mượn
+6. công việc của từng ngày, cập nhật theo ngày ( nv kho)
+7.lịch sử:
+phải có số lần đã nhập sp (ngày , nhập bao nhiêu), lưu trữ dữ liệu
+8. phiếu trả phải có ngày trả và biểu mẫu 
+có số thứ tự , thống kê có bn thiết bị đến hạn
+khi trả thì tình trạng chỉ để trả, còn nghiệp vụ anh nhân viên kho thì sẽ đến kiểm tra sp và thu hồi 
+*: xuất file danh sách thiết bị đã mượn ( vd trong năm ) 

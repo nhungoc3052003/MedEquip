@@ -128,6 +128,27 @@ export default function ImportsPage() {
     reader.readAsDataURL(file);
   };
 
+  const handleDownloadTemplate = async () => {
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'}/imports/template`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
+      });
+      if (!res.ok) throw new Error('Không thể tải file mẫu');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'template_nhap_kho_chuan.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      toast({ title: 'Thành công', description: 'Đã tải xuống file Excel mẫu nhập kho chuẩn' });
+    } catch (err: any) {
+      toast({ title: 'Lỗi', description: err.message, variant: 'destructive' });
+    }
+  };
+
   const handlePreConfirmImport = () => {
     if (!hinhAnhMinhChung) {
       toast({ title: 'Lỗi', description: 'Bắt buộc phải tải lên hình ảnh minh chứng.', variant: 'destructive' });
@@ -281,6 +302,14 @@ export default function ImportsPage() {
             ref={imageInputRef} 
             onChange={handleImageUpload}
           />
+          <Button 
+            variant="outline" 
+            onClick={handleDownloadTemplate} 
+            className="border-primary/30 text-primary hover:bg-primary/10 font-medium shadow-sm gap-1.5"
+            title="Tải file Excel mẫu chuẩn 17 cột"
+          >
+            <FileDown className="w-4 h-4" /> Tải file Excel mẫu
+          </Button>
           {canDelete && selectedPhieu.length > 0 && (
             <Button variant="outline" onClick={() => setDeleteMultipleConfirmOpen(true)} className="text-destructive border-destructive/30 hover:bg-destructive/10">
               <Trash2 className="w-4 h-4 mr-2" /> Xóa đã chọn ({selectedPhieu.length})
@@ -604,9 +633,11 @@ export default function ImportsPage() {
                       <tr>
                         <th className="p-2 border-r text-center w-8">#</th>
                         <th className="p-2 border-r text-left">Thiết bị</th>
+                        <th className="p-2 border-r text-center">Phân loại</th>
                         <th className="p-2 border-r text-left">Nhà cung cấp</th>
                         <th className="p-2 border-r text-right w-12">SL</th>
                         <th className="p-2 border-r text-right">Đơn giá</th>
+                        <th className="p-2 border-r text-center">Bảo trì / Lô-HSD</th>
                         <th className="p-2 text-left">Lỗi</th>
                       </tr>
                     </thead>
@@ -618,9 +649,30 @@ export default function ImportsPage() {
                             <div className="font-semibold truncate max-w-[150px]">{row.tenThietBi}</div>
                             <div className="text-[9px] text-muted-foreground">{row.maThietBi}</div>
                           </td>
+                          <td className="p-2 border-r text-center">
+                            <span className={cn(
+                              "text-[9px] px-1.5 py-0.5 rounded font-medium",
+                              row.loai === 'TAI_SU_DUNG' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'
+                            )}>
+                              {row.loai === 'TAI_SU_DUNG' ? 'Tái sử dụng' : 'Tiêu hao'}
+                            </span>
+                          </td>
                           <td className="p-2 border-r truncate max-w-[100px]">{row.maNcc}</td>
                           <td className="p-2 border-r text-right font-medium">+{row.soLuong}</td>
                           <td className="p-2 border-r text-right">{row.donGia.toLocaleString('vi-VN')}</td>
+                          <td className="p-2 border-r text-center text-[10px]">
+                            {row.loai === 'TAI_SU_DUNG' ? (
+                              <div className="flex flex-col items-center">
+                                <span className="font-semibold text-primary">{row.chuKyBaoTri || 6} tháng/lần</span>
+                                <span className="text-[9px] text-muted-foreground">Hạn: {row.ngayBaoTriDauTien || 'Tự tính'}</span>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col items-center">
+                                <span className="font-mono">{row.soLo || '-'}</span>
+                                <span className="text-[9px] text-muted-foreground">{row.hanSuDung || ''}</span>
+                              </div>
+                            )}
+                          </td>
                           <td className="p-2 text-destructive">
                             {row.hasError && row.errors[0]}
                           </td>

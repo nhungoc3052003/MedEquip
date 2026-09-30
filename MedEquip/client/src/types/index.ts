@@ -31,6 +31,10 @@ export interface ThietBi {
   hinhAnh?: string;
   // tồn kho (JOIN từ backend)
   soLuongKho?: number;
+  chuKyBaoTri?: number;
+  ngayBaoTriGanNhat?: string;
+  ngayBaoTriTiepTheo?: string;
+  trangThaiBaoTri?: 'BINH_THUONG' | 'SAP_DEN_HAN' | 'DANG_BAO_TRI' | 'QUA_HAN';
 }
 
 export interface TonKho {
@@ -138,6 +142,8 @@ export interface ExcelPreviewRow {
   nguongCanhBao: number;
   urlAnh: string;
   ghiChu: string;
+  chuKyBaoTri?: number | null;
+  ngayBaoTriDauTien?: string | null;
   action: 'CREATE' | 'UPDATE';
   errors: string[];
   hasError: boolean;
@@ -301,3 +307,51 @@ export const TRANG_THAI_PHIEU_TRA_LABELS: Record<string, string> = {
   TU_CHOI: 'Bị từ chối',
   HUY: 'Đã hủy',
 };
+
+export interface MaintenanceItem {
+  maThietBi: string;
+  tenThietBi: string;
+  loaiThietBi: 'TAI_SU_DUNG';
+  donViCoSo: string;
+  serialNumber: string;
+  chuKyBaoTri: number;
+  ngayBaoTriGanNhat: string | null;
+  ngayBaoTriTiepTheo: string | null;
+  trangThaiBaoTri: 'BINH_THUONG' | 'SAP_DEN_HAN' | 'DANG_BAO_TRI' | 'QUA_HAN' | 'HONG_CHO_SUA';
+  soNgayConLai: number | null;
+  soLuongKho: number;
+  soLuongDangDung: number;
+  viTriHienTai: string;
+  dangSuDung: boolean;
+  tenNhaCungCap: string;
+  hinhAnh?: string;
+}
+
+export interface MaintenanceHistoryRecord {
+  id: number;
+  maPhieuBaoTri: string;
+  maThietBi: string;
+  tenThietBi?: string;
+  loaiThietBi?: string;
+  serialNumber?: string;
+  chuKyBaoTri?: number;
+  ngayBatDau: string;
+  ngayHoanThanh: string;
+  nguoiThucHien: string;
+  loaiBaoTri: string;
+  noiDung: string;
+  ketQua: 'DAT' | 'KHONG_DAT';
+  chiPhi: number;
+  anhMinhChung?: string;
+  ghiChu?: string;
+  ngayTao: string;
+}
+
+export const TRANG_THAI_BAO_TRI_LABELS: Record<string, string> = {
+  BINH_THUONG: 'Bình thường',
+  SAP_DEN_HAN: 'Sắp đến hạn',
+  DANG_BAO_TRI: 'Đang bảo trì',
+  QUA_HAN: 'Quá hạn bảo trì',
+  HONG_CHO_SUA: 'Hỏng / Chờ sửa',
+};
+

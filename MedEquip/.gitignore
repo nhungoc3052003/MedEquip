@@ -36,3 +36,7 @@ server/config/db.js
 # Archives
 MedEquip.zip
 *.zip
+
+# Excel temporary lock files
+~$*
+

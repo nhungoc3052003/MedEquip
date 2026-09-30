@@ -126,7 +126,16 @@ export async function parseExcelPreview(req, res) {
     const tbMap = {};
     for (const tb of tbList) tbMap[tb.ma_thiet_bi] = tb.ten_thiet_bi;
 
-    const preview = rows.map((row, idx) => {
+    // Lọc bỏ các hàng tiêu đề tiếng Việt hoặc hàng hướng dẫn nếu có trong file mẫu
+    const filteredRows = rows.filter(row => {
+      const ma = String(row.ma_thiet_bi || "").trim().toLowerCase();
+      const loai = String(row.loai || "").trim();
+      if (!ma && !loai) return false;
+      if (ma.includes("mã thiết bị") || ma.includes("bắt buộc") || loai.includes("phân loại")) return false;
+      return true;
+    });
+
+    const preview = filteredRows.map((row, idx) => {
       const errors = [];
       const maThietBi = String(row.ma_thiet_bi || "").trim();
       const tenThietBi = String(row.ten_thiet_bi || "").trim();
@@ -165,6 +174,36 @@ export async function parseExcelPreview(req, res) {
       const urlAnh = String(row.url_anh || "").trim();
       const ghiChu = String(row.ghi_chu || "").trim();
 
+      // Đọc cột bảo trì cho thiết bị tái sử dụng
+      const chuKyBaoTriRaw = row.chu_ky_bao_tri !== undefined ? row.chu_ky_bao_tri : (row["Chu kỳ bảo trì (Tháng)"] || row["chu_ky"] || "");
+      let chuKyBaoTri = parseInt(chuKyBaoTriRaw) || null;
+      let ngayBaoTriDauTien = String(row.ngay_bao_tri_dau_tien || row["Ngày bảo trì đầu tiên"] || "").trim();
+
+      if (loai === "TAI_SU_DUNG") {
+        if (!chuKyBaoTri || isNaN(chuKyBaoTri)) {
+          chuKyBaoTri = 6; // Mặc định 6 tháng
+        }
+        if (ngayBaoTriDauTien) {
+          if (ngayBaoTriDauTien.includes("/")) {
+            const parts = ngayBaoTriDauTien.split("/");
+            if (parts.length === 3) {
+              const dd = parts[0].padStart(2, '0');
+              const mm = parts[1].padStart(2, '0');
+              const yyyy = parts[2];
+              ngayBaoTriDauTien = `${yyyy}-${mm}-${dd}`;
+            }
+          }
+        } else {
+          // Tự động tính = Hôm nay + chuKyBaoTri (tháng)
+          const d = new Date();
+          d.setMonth(d.getMonth() + chuKyBaoTri);
+          ngayBaoTriDauTien = d.toISOString().slice(0, 10);
+        }
+      } else {
+        chuKyBaoTri = null;
+        ngayBaoTriDauTien = null;
+      }
+
       if (!maThietBi) errors.push("Thiếu mã thiết bị");
       if (!tenThietBi) errors.push("Thiếu tên thiết bị");
       if (!["VAT_TU_TIEU_HAO", "TAI_SU_DUNG"].includes(loai)) errors.push("Loại phải là VAT_TU_TIEU_HAO hoặc TAI_SU_DUNG");
@@ -185,6 +224,8 @@ export async function parseExcelPreview(req, res) {
         maThietBi, tenThietBi, loai, soLuong, donViCoSo, donViNhap, heSoQuyDoi,
         donGia, soLo, hanSuDung, serialNumber, maNcc, nguongCanhBao,
         urlAnh, ghiChu,
+        chuKyBaoTri,
+        ngayBaoTriDauTien,
         action, // CREATE (mới) | UPDATE (cộng thêm)
         errors,
         hasError: errors.length > 0
@@ -268,19 +309,22 @@ export async function confirmImportFromExcel(req, res) {
     // Xử lý từng dòng dữ liệu Excel
     for (const row of validRows) {
       const { maThietBi, tenThietBi, loai, soLuong, donViCoSo, donViNhap, heSoQuyDoi,
-        donGia, soLo, hanSuDung, serialNumber, maNcc, nguongCanhBao, urlAnh } = row;
+        donGia, soLo, hanSuDung, serialNumber, maNcc, nguongCanhBao, urlAnh,
+        chuKyBaoTri, ngayBaoTriDauTien } = row;
 
       const soLuongCoSo = soLuong * heSoQuyDoi;
+      const chuKy = loai === 'TAI_SU_DUNG' ? (chuKyBaoTri || 6) : null;
+      const ngayBaoTri = loai === 'TAI_SU_DUNG' ? (ngayBaoTriDauTien || null) : null;
 
       // 1. Luôn đảm bảo thiết bị tồn tại trong danh mục (UPSERT thiet_bi)
-      const [existing] = await conn.query("SELECT ma_thiet_bi FROM thiet_bi WHERE ma_thiet_bi = ?", [maThietBi]);
+      const [existing] = await conn.query("SELECT ma_thiet_bi, chu_ky_bao_tri, ngay_bao_tri_tiep_theo FROM thiet_bi WHERE ma_thiet_bi = ?", [maThietBi]);
       if (existing.length === 0) {
-        // INSERT thiết bị mới
+        // INSERT thiết bị mới kèm mốc bảo trì nếu là thiết bị tái sử dụng
         await conn.query(
           `INSERT INTO thiet_bi (ma_thiet_bi, ten_thiet_bi, loai_thiet_bi, don_vi_co_so, don_vi_nhap, he_so_quy_doi,
-           ma_nha_cung_cap, hinh_anh, trang_thai)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE)`,
-          [maThietBi, tenThietBi, loai, donViCoSo, donViNhap, heSoQuyDoi, maNcc, urlAnh || ""]
+           serial_number, ma_nha_cung_cap, hinh_anh, chu_ky_bao_tri, ngay_bao_tri_tiep_theo, trang_thai_bao_tri, trang_thai)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BINH_THUONG', TRUE)`,
+          [maThietBi, tenThietBi, loai, donViCoSo, donViNhap, heSoQuyDoi, serialNumber || null, maNcc, urlAnh || "", chuKy, ngayBaoTri]
         );
         // Tạo bản ghi tồn kho trống nếu chưa có
         const tkId = "TK-" + maThietBi;
@@ -288,9 +332,21 @@ export async function confirmImportFromExcel(req, res) {
           "INSERT IGNORE INTO ton_kho (ma_ton_kho, ma_thiet_bi, so_luong_kho, so_luong_hu, so_luong_dang_dung) VALUES (?, ?, 0, 0, 0)",
           [tkId, maThietBi]
         );
-      } else if (urlAnh) {
-        // Cập nhật thông tin bổ sung nếu cần
-        await conn.query("UPDATE thiet_bi SET hinh_anh = ? WHERE ma_thiet_bi = ? AND (hinh_anh IS NULL OR hinh_anh = '')", [urlAnh, maThietBi]);
+      } else {
+        // Cập nhật thông tin bổ sung nếu thiết bị đã có nhưng chưa có mốc bảo trì
+        if (loai === 'TAI_SU_DUNG') {
+          await conn.query(
+            `UPDATE thiet_bi 
+             SET chu_ky_bao_tri = COALESCE(chu_ky_bao_tri, ?), 
+                 ngay_bao_tri_tiep_theo = COALESCE(ngay_bao_tri_tiep_theo, ?),
+                 serial_number = COALESCE(serial_number, ?),
+                 hinh_anh = CASE WHEN (hinh_anh IS NULL OR hinh_anh = '') THEN ? ELSE hinh_anh END
+             WHERE ma_thiet_bi = ?`,
+            [chuKy, ngayBaoTri, serialNumber || null, urlAnh || "", maThietBi]
+          );
+        } else if (urlAnh) {
+          await conn.query("UPDATE thiet_bi SET hinh_anh = ? WHERE ma_thiet_bi = ? AND (hinh_anh IS NULL OR hinh_anh = '')", [urlAnh, maThietBi]);
+        }
       }
 
       // 2. Nếu được tự động duyệt, cập nhật số lượng tồn kho ngay lập tức
@@ -309,12 +365,12 @@ export async function confirmImportFromExcel(req, res) {
         else hanSuDungDate = hanSuDung;
       }
 
-      // 4. Ghi chi tiết phiếu nhập (Lúc này chắc chắn maThietBi đã tồn tại trong thiet_bi)
+      // 4. Ghi chi tiết phiếu nhập (Lưu chu_ky_bao_tri và ngay_bao_tri_dau_tien)
       await conn.query(
         `INSERT INTO chi_tiet_nhap_kho
-         (ma_phieu_nhap, ma_thiet_bi, so_luong_giao_dich, so_luong_co_so, don_gia, don_vi_giao_dich, so_lo, han_su_dung)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [phieuId, maThietBi, soLuong, soLuongCoSo, donGia, donViNhap, soLo || null, hanSuDungDate]
+         (ma_phieu_nhap, ma_thiet_bi, so_luong_giao_dich, so_luong_co_so, don_gia, don_vi_giao_dich, so_lo, han_su_dung, chu_ky_bao_tri, ngay_bao_tri_dau_tien)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [phieuId, maThietBi, soLuong, soLuongCoSo, donGia, donViNhap, soLo || null, hanSuDungDate, chuKy, ngayBaoTri]
       );
     }
 
@@ -350,46 +406,42 @@ export async function downloadTemplate(req, res) {
     const wb = XLSX.utils.book_new();
     const headers = [
       "ma_thiet_bi", "ten_thiet_bi", "loai", "so_luong", "don_vi_co_so", "don_vi_nhap",
-      "he_so_quy_doi", "don_gia", "so_lo", "han_su_dung", "serial_number",
-      "ma_ncc", "nguong_canh_bao", "url_anh", "ghi_chu"
+      "he_so_quy_doi", "don_gia", "ma_ncc", "serial_number", "chu_ky_bao_tri", "ngay_bao_tri_dau_tien",
+      "so_lo", "han_su_dung", "nguong_canh_bao", "url_anh", "ghi_chu"
+    ];
+    const vietnameseTitles = [
+      "Mã thiết bị (*)", "Tên thiết bị (*)", "Phân loại (*)", "Số lượng nhập (*)", "Đơn vị cơ sở (*)", "Đơn vị nhập (*)",
+      "Hệ số quy đổi (*)", "Đơn giá (VNĐ)", "Mã NCC (*)", "Số Serial", "Chu kỳ bảo trì (Tháng)", "Ngày bảo trì đầu tiên",
+      "Số lô sản xuất", "Hạn sử dụng", "Ngưỡng báo tồn", "URL Ảnh", "Ghi chú"
     ];
     const huongDan = [
-      "Mã thiết bị (bắt buộc, VD: TB-001)",
-      "Tên thiết bị (bắt buộc)",
-      "TAI_SU_DUNG hoặc VAT_TU_TIEU_HAO",
-      "Số lượng nhập (bắt buộc, > 0)",
-      "Đơn vị cơ sở (VD: Cái)",
-      "Đơn vị nhập (VD: Thùng, Hộp)",
-      "Hệ số quy đổi (1 Đơn vị nhập = N Cơ sở, VD: 50)",
-      "Đơn giá (VND)",
-      "Số lô (bắt buộc với VTTH)",
-      "Hạn sử dụng DD/MM/YYYY (bắt buộc với VTTH)",
-      "Số serial (chỉ cho TAI_SU_DUNG)",
-      "Mã nhà cung cấp (bắt buộc, VD: NCC-001)",
-      "Ngưỡng cảnh báo tồn kho (mặc định 10)",
-      "URL hình ảnh (không bắt buộc)",
-      "Ghi chú (không bắt buộc)"
+      "Bắt buộc (VD: TB-001)", "Tên thiết bị y tế", "TAI_SU_DUNG hoặc VAT_TU_TIEU_HAO", "Số lượng nhập > 0",
+      "Đơn vị cơ sở (Cái, Chiếc, Bộ)", "Đơn vị nhập (Thùng, Hộp, Kiện)", "1 ĐV nhập = N Cơ sở", "Đơn giá (VNĐ)",
+      "Mã nhà cung cấp (VD: NCC-001)", "Bắt buộc cho TAI_SU_DUNG", "Chu kỳ tháng (3, 6, 12 cho TSD)",
+      "DD/MM/YYYY (để trống: tự động tính)", "Bắt buộc cho VTTH", "DD/MM/YYYY (Bắt buộc cho VTTH)",
+      "Ngưỡng báo tồn tối thiểu", "URL hình ảnh", "Ghi chú thêm"
     ];
     const example = [
-      "TB-001", "Máy đo huyết áp", "TAI_SU_DUNG", 5, "Cái", "Hộp",
-      1, 2500000, "", "", "SN-001",
-      "NCC-001", 2, "https://example.com/image.jpg", "Thiết bị tái sử dụng"
+      "TB-VENT-01", "Máy thở chức năng cao cấp", "TAI_SU_DUNG", 2, "Cái", "Kiện",
+      1, 450000000, "NCC-001", "SN-VENT-2026-001", 6, "30/09/2026",
+      "", "", 1, "https://example.com/may-tho.jpg", "Thiết bị hồi sức cấp cứu ICU"
     ];
     const example2 = [
-      "VT-001", "Kim tiêm 5ml", "VAT_TU_TIEU_HAO", 20, "Cái", "Thùng",
-      1000, 120000, "LOT-2026-001", "31/12/2028", "",
-      "NCC-002", 5, "https://example.com/needle.jpg", "1 thùng = 1000 cái"
+      "TB-MON-02", "Monitor theo dõi bệnh nhân 5 thông số", "TAI_SU_DUNG", 5, "Cái", "Hộp",
+      1, 35000000, "NCC-001", "SN-MON-9981", 3, "",
+      "", "", 2, "https://example.com/monitor.jpg", "Để trống ngày đầu: tự động cộng 3 tháng"
+    ];
+    const example3 = [
+      "VT-KIM-01", "Bơm kim tiêm 5ml dùng 1 lần", "VAT_TU_TIEU_HAO", 50, "Cái", "Thùng",
+      1000, 1200000, "NCC-002", "", "", "",
+      "LOT-2026-VN01", "31/12/2028", 5000, "", "1 thùng = 1000 cái vô trùng"
     ];
 
-    // Dòng 1: headers, Dòng 2: hướng dẫn, Dòng 3-4: ví dụ thực tế
-    const ws = XLSX.utils.aoa_to_sheet([headers, huongDan, example, example2]);
-
-    // Set column widths
+    const ws = XLSX.utils.aoa_to_sheet([headers, vietnameseTitles, huongDan, example, example2, example3]);
     ws['!cols'] = headers.map(() => ({ wch: 22 }));
 
     XLSX.utils.book_append_sheet(wb, ws, "Nhập kho");
 
-    // Dùng type:"array" để tránh bug ESM của xlsx@0.18.x
     const arrayBuf = XLSX.write(wb, { type: "array", bookType: "xlsx" });
     const finalBuffer = Buffer.from(new Uint8Array(arrayBuf));
 
