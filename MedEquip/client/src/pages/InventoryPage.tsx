@@ -1,10 +1,15 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { store } from '@/lib/store';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Search, Package, FileInput, FileOutput, Trash2, Pencil, X, Eye, Plus, Image as ImageIcon, QrCode, Printer, Building2, Warehouse, Download, Tag } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { 
+  Search, Package, FileInput, FileOutput, Trash2, Pencil, X, Eye, Plus, 
+  Image as ImageIcon, QrCode, Printer, Building2, Warehouse, Download, Tag,
+  Clock, CheckCircle2, AlertTriangle, ArrowRight, RefreshCw, Cpu
+} from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -36,13 +41,106 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
   const [instanceFilter, setInstanceFilter] = useState<'ALL' | 'KHO' | 'KHOA_PHONG' | 'OTHER'>('ALL');
   const [qrModalItem, setQrModalItem] = useState<any>(null);
 
+  const isTrưởngKhoa = user?.vaiTro === 'TRUONG_KHOA' || user?.vaiTro === 'TRO_LY';
+  const isAdmin = user?.vaiTro === 'ADMIN';
+  const canEdit = !isTrưởngKhoa && !isAdmin;
+
+  // Xác định mã khoa an toàn (có fallback thông minh theo tên / email nếu phiên đăng nhập thiếu trường)
+  const targetDept = user?.maKhoa || (
+    user?.email === 'khoanoi@benhvien.vn' || user?.hoTen?.includes('Nội') ? 'K-001' :
+    user?.hoTen?.includes('Ngoại') ? 'K-002' :
+    user?.hoTen?.includes('Sản') ? 'K-003' : 'K-001'
+  );
+
+  // State phản ứng đồng bộ từ API và Store
+  const [allocations, setAllocations] = useState<any[]>(() => store.getAllocations() || []);
+  const [equipment, setEquipment] = useState<any[]>(() => store.getEquipment() || []);
+  const [inventory, setInventory] = useState<any[]>(() => store.getInventory() || []);
+  const [suppliers, setSuppliers] = useState<any[]>(() => store.getSuppliers() || []);
+  const [deptInstances, setDeptInstances] = useState<any[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const [allocRes, eqRes, invRes, supRes] = await Promise.all([
+        fetchApi<any[]>('/allocations').catch(() => store.getAllocations()),
+        fetchApi<any[]>('/equipment').catch(() => store.getEquipment()),
+        fetchApi<any[]>('/inventory').catch(() => store.getInventory()),
+        fetchApi<any[]>('/suppliers').catch(() => store.getSuppliers()),
+      ]);
+
+      if (Array.isArray(allocRes) && allocRes.length > 0) {
+        setAllocations(allocRes);
+        store.setAllocations(allocRes);
+      } else {
+        setAllocations(store.getAllocations());
+      }
+
+      if (Array.isArray(eqRes) && eqRes.length > 0) {
+        setEquipment(eqRes);
+        store.setEquipment(eqRes);
+      } else {
+        setEquipment(store.getEquipment());
+      }
+
+      if (Array.isArray(invRes)) {
+        setInventory(invRes);
+        store.setInventory(invRes);
+      }
+
+      if (Array.isArray(supRes)) {
+        setSuppliers(supRes);
+        store.setSuppliers(supRes);
+      }
+
+      if (targetDept) {
+        try {
+          const instRes = await fetchApi<any[]>(`/instances/department/${targetDept}`);
+          if (Array.isArray(instRes)) {
+            setDeptInstances(instRes);
+          }
+        } catch (e) {
+          console.error('Fetch dept instances error:', e);
+        }
+      }
+    } catch (err) {
+      console.error('Fetch stock data error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+
+    const handleUpdate = () => {
+      setAllocations(store.getAllocations());
+      setEquipment(store.getEquipment());
+      setInventory(store.getInventory());
+      setSuppliers(store.getSuppliers());
+    };
+
+    window.addEventListener('store_allocations_changed', handleUpdate);
+    window.addEventListener('store_equipment_changed', handleUpdate);
+    window.addEventListener('store_inventory_changed', handleUpdate);
+    window.addEventListener('store_data_updated', handleUpdate);
+
+    return () => {
+      window.removeEventListener('store_allocations_changed', handleUpdate);
+      window.removeEventListener('store_equipment_changed', handleUpdate);
+      window.removeEventListener('store_inventory_changed', handleUpdate);
+      window.removeEventListener('store_data_updated', handleUpdate);
+    };
+  }, [targetDept]);
+
   const openInstancesModal = async (tb: any) => {
     if (!tb) return;
     setSelectedEquipmentForInstances(tb);
     setInstancesDialogOpen(true);
     setLoadingInstances(true);
     setInstanceSearch('');
-    setInstanceFilter('ALL');
+    setInstanceFilter(isTrưởngKhoa ? 'KHOA_PHONG' : 'ALL');
     try {
       const data = await fetchApi<any[]>(`/instances?maThietBi=${tb.maThietBi}`);
       setInstancesList(Array.isArray(data) ? data : []);
@@ -57,7 +155,10 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
   const filteredInstances = useMemo(() => {
     return instancesList.filter(inst => {
       if (instanceFilter === 'KHO' && inst.viTri !== 'KHO') return false;
-      if (instanceFilter === 'KHOA_PHONG' && inst.viTri !== 'KHOA_PHONG') return false;
+      if (instanceFilter === 'KHOA_PHONG') {
+        if (inst.viTri !== 'KHOA_PHONG') return false;
+        if (isTrưởngKhoa && inst.maKhoa && inst.maKhoa !== targetDept) return false;
+      }
       if (instanceFilter === 'OTHER' && (inst.viTri === 'KHO' || inst.viTri === 'KHOA_PHONG')) return false;
       if (instanceSearch) {
         const q = instanceSearch.toLowerCase().trim();
@@ -70,16 +171,7 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
       }
       return true;
     });
-  }, [instancesList, instanceFilter, instanceSearch]);
-  
-  const inventory = store.getInventory();
-  const equipment = store.getEquipment();
-  const suppliers = store.getSuppliers();
-  const allocations = store.getAllocations();
-
-  const isTrưởngKhoa = user?.vaiTro === 'TRUONG_KHOA';
-  const isAdmin = user?.vaiTro === 'ADMIN';
-  const canEdit = !isTrưởngKhoa && !isAdmin;
+  }, [instancesList, instanceFilter, instanceSearch, isTrưởngKhoa, targetDept]);
 
   const [form, setForm] = useState<{
     tenThietBi: string; loaiThietBi: 'VAT_TU_TIEU_HAO' | 'TAI_SU_DUNG'; donViCoSo: string; donViNhap: string;
@@ -95,23 +187,41 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
     let result: any[] = [];
     if (isTrưởngKhoa) {
       result = allocations
-        .filter(a => a.maKhoa === user?.maKhoa && a.trangThaiTra !== 'DA_TRA')
-        .map(a => {
-          const eq = equipment.find(e => e.maThietBi === a.maThietBi);
+        .filter(a => {
+          const matchDept = (a.maKhoa === targetDept) || (a.maKhoaNhan === targetDept);
+          const notReturned = a.trangThaiTra !== 'DA_TRA';
+          return matchDept && notReturned;
+        })
+        .map((a, idx) => {
+          const eq = equipment.find(e => e.maThietBi === a.maThietBi) || {
+            maThietBi: a.maThietBi,
+            tenThietBi: a.tenThietBi || a.maThietBi,
+            loaiThietBi: a.loaiThietBi || 'TAI_SU_DUNG',
+            donViCoSo: a.donViTinh || 'Cái',
+            moTa: ''
+          };
           return {
             ...a,
             thietBi: eq,
             soLuongKho: 0, 
             soLuongDangDung: a.soLuongCapPhat,
             soLuongHu: 0,
-            maTonKho: a.maPhieu,
+            maTonKho: `${a.maPhieu}-${a.maThietBi || 'item'}-${a.id || idx}`,
             donGia: 0
           };
         })
-        .filter(d => 
-          String(d.thietBi?.tenThietBi || '').toLowerCase().includes(search.toLowerCase()) ||
-          String(d.maThietBi || '').toLowerCase().includes(search.toLowerCase())
-        );
+        .filter(d => {
+          const matchSearch = String(d.thietBi?.tenThietBi || d.tenThietBi || '').toLowerCase().includes(search.toLowerCase()) ||
+                              String(d.maThietBi || '').toLowerCase().includes(search.toLowerCase()) ||
+                              String(d.maPhieu || '').toLowerCase().includes(search.toLowerCase());
+          if (!matchSearch) return false;
+
+          if (filterStatus === 'CHUA_TRA') return d.trangThaiTra === 'CHUA_TRA';
+          if (filterStatus === 'YEU_CAU_TRA') return d.trangThaiTra === 'YEU_CAU_TRA';
+          if (filterStatus === 'DA_GIA_HAN') return d.trangThaiTra === 'DA_GIA_HAN';
+
+          return true;
+        });
     } else {
       result = inventory.map(inv => ({
         ...inv,
@@ -150,7 +260,33 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
     });
 
     return result;
-  }, [inventory, equipment, allocations, search, filterStatus, sortOption, isTrưởngKhoa, user?.maKhoa]);
+  }, [inventory, equipment, allocations, search, filterStatus, sortOption, isTrưởngKhoa, targetDept]);
+
+  // Thống kê nhanh cho Trưởng khoa
+  const statsTrưởngKhoa = useMemo(() => {
+    if (!isTrưởngKhoa) return null;
+    const myAllocs = allocations.filter(a => ((a.maKhoa === targetDept) || (a.maKhoaNhan === targetDept)) && a.trangThaiTra !== 'DA_TRA');
+    return {
+      total: myAllocs.length,
+      using: myAllocs.filter(a => a.trangThaiTra === 'CHUA_TRA').length,
+      returning: myAllocs.filter(a => a.trangThaiTra === 'YEU_CAU_TRA').length,
+      extended: myAllocs.filter(a => a.trangThaiTra === 'DA_GIA_HAN').length,
+      instancesCount: deptInstances.length
+    };
+  }, [isTrưởngKhoa, allocations, targetDept, deptInstances]);
+
+  const renderStatusBadge = (status: string) => {
+    switch (status) {
+      case 'CHUA_TRA':
+        return <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/30 hover:bg-emerald-500/20 font-medium">Đang sử dụng</Badge>;
+      case 'YEU_CAU_TRA':
+        return <Badge className="bg-amber-500/10 text-amber-700 border-amber-500/30 hover:bg-amber-500/20 font-medium">Chờ duyệt trả</Badge>;
+      case 'DA_GIA_HAN':
+        return <Badge className="bg-purple-500/10 text-purple-700 border-purple-500/30 hover:bg-purple-500/20 font-medium">Đã gia hạn</Badge>;
+      default:
+        return <Badge variant="outline">{status}</Badge>;
+    }
+  };
 
   const openAdd = () => {
     setSelectedItem(null);
@@ -225,26 +361,95 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
 
   return (
     <div className="space-y-4">
+      {/* Thống kê nhanh cho Trưởng khoa */}
+      {isTrưởngKhoa && statsTrưởngKhoa && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
+          <div className="p-3.5 rounded-xl border border-primary/20 bg-primary/5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-muted-foreground">Tổng thiết bị</span>
+              <Package className="w-4 h-4 text-primary" />
+            </div>
+            <div className="text-2xl font-bold mt-1 text-foreground">{statsTrưởngKhoa.total}</div>
+            <div className="text-[11px] text-muted-foreground mt-0.5">Mục đang mượn</div>
+          </div>
+
+          <div className="p-3.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-emerald-700">Đang sử dụng</span>
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+            </div>
+            <div className="text-2xl font-bold mt-1 text-emerald-700">{statsTrưởngKhoa.using}</div>
+            <div className="text-[11px] text-emerald-600/80 mt-0.5">Hoạt động bình thường</div>
+          </div>
+
+          <div className="p-3.5 rounded-xl border border-amber-500/20 bg-amber-500/5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-amber-700">Chờ duyệt trả</span>
+              <Clock className="w-4 h-4 text-amber-600" />
+            </div>
+            <div className="text-2xl font-bold mt-1 text-amber-700">{statsTrưởngKhoa.returning}</div>
+            <div className="text-[11px] text-amber-600/80 mt-0.5">Đã gửi yêu cầu trả</div>
+          </div>
+
+          <div className="p-3.5 rounded-xl border border-purple-500/20 bg-purple-500/5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-purple-700">Đã gia hạn</span>
+              <AlertTriangle className="w-4 h-4 text-purple-600" />
+            </div>
+            <div className="text-2xl font-bold mt-1 text-purple-700">{statsTrưởngKhoa.extended}</div>
+            <div className="text-[11px] text-purple-600/80 mt-0.5">Gia hạn thời gian</div>
+          </div>
+
+          <div className="p-3.5 rounded-xl border border-blue-500/20 bg-blue-500/5 col-span-2 sm:col-span-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-blue-700">Máy cá thể</span>
+              <Cpu className="w-4 h-4 text-blue-600" />
+            </div>
+            <div className="text-2xl font-bold mt-1 text-blue-700">{statsTrưởngKhoa.instancesCount}</div>
+            <div className="text-[11px] text-blue-600/80 mt-0.5">Máy vật lý tại khoa</div>
+          </div>
+        </div>
+      )}
+
+      {/* Toolbar bộ lọc */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
         <div className="flex-1 flex flex-col sm:flex-row gap-3 w-full max-w-2xl">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input placeholder="Tìm tên, mã thiết bị..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10 w-full" />
+            <Input 
+              placeholder={isTrưởngKhoa ? "Tìm tên, mã thiết bị, mã phiếu cấp..." : "Tìm tên, mã thiết bị..."} 
+              value={search} 
+              onChange={e => setSearch(e.target.value)} 
+              className="pl-10 w-full" 
+            />
           </div>
+          
           <Select value={filterStatus} onValueChange={setFilterStatus}>
             <SelectTrigger className="w-full sm:w-[200px]">
-              <SelectValue placeholder="Lọc thiết bị" />
+              <SelectValue placeholder="Lọc trạng thái" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="ALL">Tất cả thiết bị</SelectItem>
-              <SelectItem value="TRONG_KHO">Đang có trong kho</SelectItem>
-              <SelectItem value="DANG_DUNG">Đang được sử dụng</SelectItem>
-              <SelectItem value="HU_HONG">Có thiết bị hư hỏng</SelectItem>
-              <SelectItem value="HET_HANG">Đã hết sạch hàng</SelectItem>
+              {isTrưởngKhoa ? (
+                <>
+                  <SelectItem value="ALL">Tất cả thiết bị mượn</SelectItem>
+                  <SelectItem value="CHUA_TRA">Đang sử dụng</SelectItem>
+                  <SelectItem value="YEU_CAU_TRA">Đang yêu cầu trả</SelectItem>
+                  <SelectItem value="DA_GIA_HAN">Đã gia hạn</SelectItem>
+                </>
+              ) : (
+                <>
+                  <SelectItem value="ALL">Tất cả thiết bị</SelectItem>
+                  <SelectItem value="TRONG_KHO">Đang có trong kho</SelectItem>
+                  <SelectItem value="DANG_DUNG">Đang được sử dụng</SelectItem>
+                  <SelectItem value="HU_HONG">Có thiết bị hư hỏng</SelectItem>
+                  <SelectItem value="HET_HANG">Đã hết sạch hàng</SelectItem>
+                </>
+              )}
             </SelectContent>
           </Select>
+
           <Select value={sortOption} onValueChange={setSortOption}>
-            <SelectTrigger className="w-full sm:w-[200px]">
+            <SelectTrigger className="w-full sm:w-[180px]">
               <SelectValue placeholder="Sắp xếp" />
             </SelectTrigger>
             <SelectContent>
@@ -260,6 +465,16 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
               )}
             </SelectContent>
           </Select>
+
+          <Button 
+            variant="outline" 
+            size="icon" 
+            title="Tải lại dữ liệu"
+            onClick={() => loadData()}
+            disabled={loading}
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-primary' : 'text-muted-foreground'}`} />
+          </Button>
         </div>
       </div>
 
@@ -277,104 +492,142 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-xl border border-border/50 bg-card/30">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b bg-muted/50">
-              <th className="text-left p-4 font-medium text-muted-foreground">Thiết bị</th>
-              {isTrưởngKhoa ? (
-                <>
-                  <th className="text-center p-4 font-medium text-muted-foreground">Số lượng mượn</th>
-                  <th className="text-center p-4 font-medium text-muted-foreground">Ngày cấp</th>
-                  <th className="text-center p-4 font-medium text-muted-foreground">Hạn trả (Dự kiến)</th>
-                </>
-              ) : (
-                <>
-                  <th className="text-center p-4 font-medium text-muted-foreground">Trong kho</th>
-                  <th className="text-center p-4 font-medium text-muted-foreground">Đang dùng</th>
-                  <th className="text-center p-4 font-medium text-muted-foreground">Hư hỏng</th>
-                  <th className="text-center p-4 font-medium text-muted-foreground">Tổng cộng SL</th>
-                  <th className="text-right p-4 font-medium text-muted-foreground w-36">Tổng trị giá</th>
-                </>
-              )}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border/50">
-            {data.map(d => (
-              <tr 
-                key={d.maTonKho} 
-                className="hover:bg-muted/30 transition-colors cursor-pointer group"
-                onClick={() => { setSelectedItem(d.thietBi); setDetailOpen(true); }}
-              >
-                <td className="p-4">
-                  <div className="font-medium text-foreground group-hover:text-primary transition-colors">{d.thietBi?.tenThietBi || 'Thiết bị không xác định'}</div>
-                  <div className="text-xs font-mono text-muted-foreground mt-0.5">{d.maThietBi}</div>
-                  {d.thietBi?.loaiThietBi === 'TAI_SU_DUNG' && (
-                    <div className="mt-1">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-6 text-[10px] px-2 py-0 border-primary/30 text-primary hover:bg-primary/10 gap-1 rounded-full font-normal shadow-none"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openInstancesModal(d.thietBi);
-                        }}
-                      >
-                        <QrCode className="w-3 h-3" /> Xem mã máy cá thể
-                      </Button>
-                    </div>
-                  )}
-                </td>
-                
+      {loading ? (
+        <div className="flex flex-col items-center justify-center py-16 border rounded-xl bg-card/40 gap-3">
+          <RefreshCw className="w-7 h-7 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground font-medium">Đang tải danh sách thiết bị...</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-border/50 bg-card/30">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-muted/50">
+                <th className="text-left p-4 font-medium text-muted-foreground">Thiết bị</th>
                 {isTrưởngKhoa ? (
                   <>
-                    <td className="p-4 text-center">
-                      <span className="inline-flex items-center justify-center min-w-[32px] px-2 py-1 rounded-md bg-primary/10 text-primary font-semibold">
-                        {d.soLuongCapPhat}
-                      </span>
-                    </td>
-                    <td className="p-4 text-center text-muted-foreground">
-                      {new Date(d.ngayCapPhat).toLocaleDateString('vi-VN')}
-                    </td>
-                    <td className="p-4 text-center">
-                      <span className={new Date(d.ngayDuKienTra) < new Date() ? 'text-destructive font-medium' : 'text-muted-foreground'}>
-                        {d.ngayDuKienTra ? new Date(d.ngayDuKienTra).toLocaleDateString('vi-VN') : '—'}
-                      </span>
-                    </td>
+                    <th className="text-left p-4 font-medium text-muted-foreground">Mã phiếu cấp</th>
+                    <th className="text-center p-4 font-medium text-muted-foreground">Số lượng mượn</th>
+                    <th className="text-center p-4 font-medium text-muted-foreground">Ngày cấp</th>
+                    <th className="text-center p-4 font-medium text-muted-foreground">Hạn trả (Dự kiến)</th>
+                    <th className="text-center p-4 font-medium text-muted-foreground">Trạng thái</th>
+                    <th className="text-right p-4 font-medium text-muted-foreground">Thao tác</th>
                   </>
                 ) : (
                   <>
-                    <td className="p-4 text-center">
-                      <span className="inline-flex items-center justify-center min-w-[32px] px-2 py-1 rounded-md bg-primary/10 text-primary font-semibold">
-                        {d.soLuongKho} <span className="text-[10px] ml-1">{d.thietBi?.donViCoSo}</span>
-                      </span>
-                    </td>
-                    <td className="p-4 text-center">
-                      <span className="inline-flex items-center justify-center min-w-[32px] px-2 py-1 rounded-md bg-secondary/10 text-secondary-foreground font-semibold">
-                        {d.soLuongDangDung} <span className="text-[10px] ml-1">{d.thietBi?.donViCoSo}</span>
-                      </span>
-                    </td>
-                    <td className="p-4 text-center">
-                      <span className="inline-flex items-center justify-center min-w-[32px] px-2 py-1 rounded-md bg-warning/10 text-warning font-semibold">
-                        {d.soLuongHu} <span className="text-[10px] ml-1">{d.thietBi?.donViCoSo}</span>
-                      </span>
-                    </td>
-                    <td className="p-4 text-center">
-                      <span className="text-base font-bold text-foreground">
-                        {d.soLuongKho + d.soLuongDangDung + d.soLuongHu} <span className="text-xs font-normal text-muted-foreground">{d.thietBi?.donViCoSo}</span>
-                      </span>
-                    </td>
-                    <td className="p-4 text-right font-mono font-semibold text-primary">
-                      {d.donGia ? new Intl.NumberFormat('vi-VN').format(d.donGia * (d.soLuongKho + d.soLuongDangDung + d.soLuongHu)) + ' đ' : '-'}
-                    </td>
+                    <th className="text-center p-4 font-medium text-muted-foreground">Trong kho</th>
+                    <th className="text-center p-4 font-medium text-muted-foreground">Đang dùng</th>
+                    <th className="text-center p-4 font-medium text-muted-foreground">Hư hỏng</th>
+                    <th className="text-center p-4 font-medium text-muted-foreground">Tổng cộng SL</th>
+                    <th className="text-right p-4 font-medium text-muted-foreground w-36">Tổng trị giá</th>
                   </>
                 )}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody className="divide-y divide-border/50">
+              {data.map(d => (
+                <tr 
+                  key={d.maTonKho} 
+                  className="hover:bg-muted/30 transition-colors cursor-pointer group"
+                  onClick={() => { setSelectedItem(d.thietBi); setDetailOpen(true); }}
+                >
+                  <td className="p-4">
+                    <div className="font-medium text-foreground group-hover:text-primary transition-colors">
+                      {d.thietBi?.tenThietBi || d.tenThietBi || 'Thiết bị không xác định'}
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-xs font-mono text-muted-foreground">{d.maThietBi}</span>
+                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-muted text-muted-foreground">
+                        {d.thietBi?.loaiThietBi === 'VAT_TU_TIEU_HAO' ? 'Tiêu hao' : 'Tái sử dụng'}
+                      </span>
+                    </div>
+                    {d.thietBi?.loaiThietBi === 'TAI_SU_DUNG' && (
+                      <div className="mt-1.5">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-6 text-[10px] px-2 py-0 border-primary/30 text-primary hover:bg-primary/10 gap-1 rounded-full font-normal shadow-none"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openInstancesModal(d.thietBi);
+                          }}
+                        >
+                          <QrCode className="w-3 h-3" /> Xem mã máy cá thể & QR
+                        </Button>
+                      </div>
+                    )}
+                  </td>
+                  
+                  {isTrưởngKhoa ? (
+                    <>
+                      <td className="p-4">
+                        <span className="font-mono text-xs font-semibold text-primary bg-primary/10 px-2 py-1 rounded">
+                          {d.maPhieu}
+                        </span>
+                      </td>
+                      <td className="p-4 text-center">
+                        <span className="inline-flex items-center justify-center min-w-[32px] px-2.5 py-1 rounded-md bg-primary/10 text-primary font-semibold text-xs">
+                          {d.soLuongCapPhat} {d.thietBi?.donViCoSo || d.donViTinh || ''}
+                        </span>
+                      </td>
+                      <td className="p-4 text-center text-muted-foreground text-xs">
+                        {d.ngayCapPhat ? new Date(d.ngayCapPhat).toLocaleDateString('vi-VN') : '—'}
+                      </td>
+                      <td className="p-4 text-center">
+                        <span className={`text-xs ${d.ngayDuKienTra && new Date(d.ngayDuKienTra) < new Date() ? 'text-destructive font-semibold' : 'text-muted-foreground'}`}>
+                          {d.ngayDuKienTra ? new Date(d.ngayDuKienTra).toLocaleDateString('vi-VN') : '—'}
+                        </span>
+                      </td>
+                      <td className="p-4 text-center">
+                        {renderStatusBadge(d.trangThaiTra)}
+                      </td>
+                      <td className="p-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5" onClick={e => e.stopPropagation()}>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs text-muted-foreground hover:text-foreground"
+                            onClick={() => { setSelectedItem(d.thietBi); setDetailOpen(true); }}
+                          >
+                            <Eye className="w-3.5 h-3.5 mr-1" /> Chi tiết
+                          </Button>
+                        </div>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="p-4 text-center">
+                        <span className="inline-flex items-center justify-center min-w-[32px] px-2 py-1 rounded-md bg-primary/10 text-primary font-semibold">
+                          {d.soLuongKho} <span className="text-[10px] ml-1">{d.thietBi?.donViCoSo}</span>
+                        </span>
+                      </td>
+                      <td className="p-4 text-center">
+                        <span className="inline-flex items-center justify-center min-w-[32px] px-2 py-1 rounded-md bg-secondary/10 text-secondary-foreground font-semibold">
+                          {d.soLuongDangDung} <span className="text-[10px] ml-1">{d.thietBi?.donViCoSo}</span>
+                        </span>
+                      </td>
+                      <td className="p-4 text-center">
+                        <span className="inline-flex items-center justify-center min-w-[32px] px-2 py-1 rounded-md bg-warning/10 text-warning font-semibold">
+                          {d.soLuongHu} <span className="text-[10px] ml-1">{d.thietBi?.donViCoSo}</span>
+                        </span>
+                      </td>
+                      <td className="p-4 text-center">
+                        <span className="text-base font-bold text-foreground">
+                          {d.soLuongKho + d.soLuongDangDung + d.soLuongHu} <span className="text-xs font-normal text-muted-foreground">{d.thietBi?.donViCoSo}</span>
+                        </span>
+                      </td>
+                      <td className="p-4 text-right font-mono font-semibold text-primary">
+                        {d.donGia ? new Intl.NumberFormat('vi-VN').format(d.donGia * (d.soLuongKho + d.soLuongDangDung + d.soLuongHu)) + ' đ' : '-'}
+                      </td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Detail Dialog */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
@@ -702,10 +955,14 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
         </DialogContent>
       </Dialog>
 
-      {data.length === 0 && (
+      {data.length === 0 && !loading && (
         <div className="text-center py-12 border border-dashed rounded-xl bg-muted/20">
           <Package className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
-          <p className="text-muted-foreground">Không tìm thấy dữ liệu tồn kho phù hợp</p>
+          <p className="text-muted-foreground font-medium">
+            {isTrưởngKhoa 
+              ? 'Khoa hiện tại chưa có thiết bị nào đang mượn hoặc không có mục nào khớp bộ lọc' 
+              : 'Không tìm thấy dữ liệu tồn kho phù hợp'}
+          </p>
         </div>
       )}
     </div>
@@ -717,7 +974,7 @@ export default function InventoryPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const triggerRefresh = () => setRefreshKey(prev => prev + 1);
 
-  const isTrưởngKhoa = user?.vaiTro === 'TRUONG_KHOA';
+  const isTrưởngKhoa = user?.vaiTro === 'TRUONG_KHOA' || user?.vaiTro === 'TRO_LY';
   const isAdmin = user?.vaiTro === 'ADMIN';
   const canEdit = !isTrưởngKhoa && !isAdmin;
 
@@ -735,8 +992,8 @@ export default function InventoryPage() {
       </div>
 
       <Tabs defaultValue="stock" className="w-full space-y-6">
-        <TabsList className={`grid w-full ${isTrưởngKhoa ? 'grid-cols-2 lg:max-w-md' : 'grid-cols-2 md:grid-cols-4 lg:max-w-2xl'} bg-muted/40 p-1 rounded-xl`}>
-          <TabsTrigger value="stock" className="rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
+        <TabsList className={`${isTrưởngKhoa ? 'inline-flex w-auto' : 'grid w-full grid-cols-2 md:grid-cols-4 lg:max-w-2xl'} bg-muted/40 p-1 rounded-xl`}>
+          <TabsTrigger value="stock" className="rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm px-4">
             <Package className="w-4 h-4 mr-2" />
             {isTrưởngKhoa ? 'Thiết bị của khoa' : 'Tồn kho'}
           </TabsTrigger>
@@ -752,7 +1009,6 @@ export default function InventoryPage() {
               </TabsTrigger>
             </>
           )}
-          {/* Removed requests tab */}
         </TabsList>
 
         <TabsContent value="stock" className="outline-none">

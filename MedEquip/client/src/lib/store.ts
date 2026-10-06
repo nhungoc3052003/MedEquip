@@ -3,8 +3,9 @@ import { NguoiDung, ThietBi, TonKho, NhaCungCap, Khoa, ThongBao, PhieuYeuCauCapP
 const defaultUsers: NguoiDung[] = [
   { maNguoiDung: 'ND-001', hoTen: 'Nguyễn Văn Admin', email: 'admin@benhvien.vn', matKhau: '123456', vaiTro: 'ADMIN', trangThai: true, ngayTao: '2026-01-01', ngayCapNhat: '2026-01-01' },
   { maNguoiDung: 'ND-002', hoTen: 'Trần Thị Kho', email: 'kho@benhvien.vn', matKhau: '123456', vaiTro: 'NV_KHO', trangThai: true, ngayTao: '2026-01-01', ngayCapNhat: '2026-01-01' },
-  { maNguoiDung: 'ND-003', hoTen: 'Lê Minh Khoa', email: 'truongkhoa@benhvien.vn', matKhau: '123456', vaiTro: 'TRUONG_KHOA', trangThai: true, ngayTao: '2026-01-01', ngayCapNhat: '2026-01-01' },
-  { maNguoiDung: 'ND-004', hoTen: 'Nguyễn Thị Lan', email: 'lan@benhvien.vn', matKhau: '123456', vaiTro: 'TRUONG_KHOA', trangThai: true, ngayTao: '2026-01-01', ngayCapNhat: '2026-01-01' },
+  { maNguoiDung: 'ND-003', hoTen: 'Trưởng khoa Nội', email: 'khoanoi@benhvien.vn', matKhau: '123456', vaiTro: 'TRUONG_KHOA', maKhoa: 'K-001', trangThai: true, ngayTao: '2026-01-01', ngayCapNhat: '2026-01-01' },
+  { maNguoiDung: 'ND-004', hoTen: 'Trưởng khoa Ngoại', email: 'khoangoai@benhvien.vn', matKhau: '123456', vaiTro: 'TRUONG_KHOA', maKhoa: 'K-002', trangThai: true, ngayTao: '2026-01-01', ngayCapNhat: '2026-01-01' },
+  { maNguoiDung: 'ND-005', hoTen: 'Trưởng khoa Sản', email: 'khoasan@benhvien.vn', matKhau: '123456', vaiTro: 'TRUONG_KHOA', maKhoa: 'K-003', trangThai: true, ngayTao: '2026-01-01', ngayCapNhat: '2026-01-01' },
 ];
 
 const defaultEquipment: ThietBi[] = [
@@ -62,13 +63,22 @@ export const store = {
   setUsers: (d: NguoiDung[]) => setStore('kho_users', d),
 
   getEquipment: () => getStore<ThietBi>('kho_equipment', defaultEquipment),
-  setEquipment: (d: ThietBi[]) => setStore('kho_equipment', d),
+  setEquipment: (d: ThietBi[]) => {
+    setStore('kho_equipment', d);
+    window.dispatchEvent(new Event('store_equipment_changed'));
+  },
 
   getInventory: () => getStore<TonKho>('kho_inventory', defaultInventory),
-  setInventory: (d: TonKho[]) => setStore('kho_inventory', d),
+  setInventory: (d: TonKho[]) => {
+    setStore('kho_inventory', d);
+    window.dispatchEvent(new Event('store_inventory_changed'));
+  },
 
   getSuppliers: () => getStore<NhaCungCap>('kho_suppliers', defaultSuppliers),
-  setSuppliers: (d: NhaCungCap[]) => setStore('kho_suppliers', d),
+  setSuppliers: (d: NhaCungCap[]) => {
+    setStore('kho_suppliers', d);
+    window.dispatchEvent(new Event('store_suppliers_changed'));
+  },
 
   getDepartments: () => getStore<Khoa>('kho_departments', defaultDepartments),
   setDepartments: (d: Khoa[]) => setStore('kho_departments', d),
@@ -89,7 +99,10 @@ export const store = {
   setImports: (d: PhieuNhapKho[]) => setStore('kho_imports', d),
 
   getAllocations: () => getStore<PhieuCapPhat>('kho_allocations', []),
-  setAllocations: (d: PhieuCapPhat[]) => setStore('kho_allocations', d),
+  setAllocations: (d: PhieuCapPhat[]) => {
+    setStore('kho_allocations', d);
+    window.dispatchEvent(new Event('store_allocations_changed'));
+  },
 
   getDamageReports: () => getStore<PhieuBaoHuHong>('kho_damage_reports', []),
   setDamageReports: (d: PhieuBaoHuHong[]) => setStore('kho_damage_reports', d),
@@ -128,6 +141,11 @@ export const store = {
     if (data.damageReports) setStore('kho_damage_reports', data.damageReports);
     if (data.returns) setStore('kho_returns', data.returns);
     if ((data as any).importRequests) setStore('kho_import_reqs', (data as any).importRequests);
+
+    window.dispatchEvent(new Event('store_data_updated'));
+    window.dispatchEvent(new Event('store_allocations_changed'));
+    window.dispatchEvent(new Event('store_equipment_changed'));
+    window.dispatchEvent(new Event('store_inventory_changed'));
   },
 
   clearCache: () => { memoryCache = {}; },
