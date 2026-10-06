@@ -183,8 +183,9 @@ export default function TransfersPage() {
     }
 
     try {
+      const targetDept = user?.maKhoa || needDept;
       const res = await apiCreateNeed({
-        maKhoaYeuCau: needDept,
+        maKhoaYeuCau: targetDept,
         maThietBi: needEquipment || undefined,
         tenThietBi: finalTbName,
         soLuongCan: Number(needQty),
@@ -950,12 +951,26 @@ export default function TransfersPage() {
 
             <div>
               <Label className="mb-1 block font-semibold">Khoa yêu cầu <span className="text-destructive">*</span></Label>
-              <SearchableSelect
-                options={departments.map(d => ({ value: d.maKhoa, label: `${d.tenKhoa} (${d.maKhoa})` }))}
-                value={needDept}
-                onValueChange={setNeedDept}
-                placeholder="Chọn khoa của bạn..."
-              />
+              {user?.maKhoa ? (
+                <div className="flex items-center justify-between p-3 bg-muted/40 border border-border rounded-xl text-xs sm:text-sm">
+                  <div className="flex items-center gap-2">
+                    <Building2 className="w-4 h-4 text-purple-600" />
+                    <span className="font-bold text-foreground">
+                      {departments.find(d => d.maKhoa === user.maKhoa)?.tenKhoa || user.maKhoa} ({user.maKhoa})
+                    </span>
+                  </div>
+                  <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 text-[10px] font-medium">
+                    Mặc định theo khoa của bạn
+                  </Badge>
+                </div>
+              ) : (
+                <SearchableSelect
+                  options={departments.map(d => ({ value: d.maKhoa, label: `${d.tenKhoa} (${d.maKhoa})` }))}
+                  value={needDept}
+                  onValueChange={setNeedDept}
+                  placeholder="Chọn khoa yêu cầu..."
+                />
+              )}
             </div>
 
             <div>
@@ -1057,8 +1072,21 @@ export default function TransfersPage() {
             )}
 
             <div>
+              <Label className="mb-1 block font-semibold">Khoa bàn giao (Khoa gửi)</Label>
+              <div className="flex items-center justify-between p-2.5 bg-muted/40 border border-border rounded-xl text-xs sm:text-sm mb-3">
+                <div className="flex items-center gap-2">
+                  <Building2 className="w-4 h-4 text-purple-600" />
+                  <span className="font-bold text-foreground">
+                    {departments.find(d => d.maKhoa === (user?.maKhoa || 'KNOI'))?.tenKhoa || (user?.maKhoa || 'KNOI')} ({user?.maKhoa || 'KNOI'})
+                  </span>
+                </div>
+                <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 text-[10px] font-medium">
+                  Khoa của bạn
+                </Badge>
+              </div>
+
               <Label className="mb-1 block font-semibold">
-                Chọn máy cá thể tại khoa ({user?.maKhoa || 'KNOI'}) <span className="text-destructive">*</span>
+                Chọn máy cá thể tại khoa cần điều chuyển <span className="text-destructive">*</span>
               </Label>
               {loadingDeptInstances ? (
                 <div className="text-xs text-muted-foreground py-2 italic">Đang tải danh sách máy khoa đang giữ...</div>
