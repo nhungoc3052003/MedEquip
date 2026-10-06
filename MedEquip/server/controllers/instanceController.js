@@ -177,7 +177,7 @@ export async function getDepartmentInstances(req, res) {
       FROM ca_the_thiet_bi c
       JOIN thiet_bi tb ON c.ma_thiet_bi = tb.ma_thiet_bi
       LEFT JOIN khoa kp ON c.ma_khoa_hien_tai = kp.ma_khoa
-      WHERE c.ma_khoa_hien_tai = ? AND c.trang_thai = 'DANG_SU_DUNG'
+      WHERE c.ma_khoa_hien_tai = ? AND c.trang_thai != 'DA_THANH_LY'
       ORDER BY c.ngay_tra_du_kien ASC, c.ma_ca_the ASC
     `, [maKhoa]);
 
@@ -192,6 +192,7 @@ export async function getDepartmentInstances(req, res) {
         donViCoSo: r.don_vi_co_so,
         maKhoa: r.ma_khoa_hien_tai,
         tenKhoa: r.ten_khoa,
+        trangThai: r.trang_thai || "DANG_SU_DUNG",
         maPhieuCapPhat: r.ma_phieu_cap_phat_hien_tai,
         ngayCapPhat: r.ngay_cap_phat,
         ngayTraDuKien: r.ngay_tra_du_kien,

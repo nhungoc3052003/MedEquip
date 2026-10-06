@@ -40,6 +40,7 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
   const [instanceSearch, setInstanceSearch] = useState('');
   const [instanceFilter, setInstanceFilter] = useState<'ALL' | 'KHO' | 'KHOA_PHONG' | 'OTHER'>('ALL');
   const [qrModalItem, setQrModalItem] = useState<any>(null);
+  const [deptInstancesModalOpen, setDeptInstancesModalOpen] = useState(false);
 
   const isTrưởngKhoa = user?.vaiTro === 'TRUONG_KHOA' || user?.vaiTro === 'TRO_LY';
   const isAdmin = user?.vaiTro === 'ADMIN';
@@ -361,52 +362,98 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
 
   return (
     <div className="space-y-4">
-      {/* Thống kê nhanh cho Trưởng khoa */}
+      {/* Thống kê nhanh cho Trưởng khoa - Bấm vào thẻ để lọc hoặc xem chi tiết */}
       {isTrưởngKhoa && statsTrưởngKhoa && (
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
-          <div className="p-3.5 rounded-xl border border-primary/20 bg-primary/5">
+          <div 
+            onClick={() => setFilterStatus('ALL')}
+            className={`p-3.5 rounded-xl border transition-all cursor-pointer hover:shadow-md hover:scale-[1.01] active:scale-[0.99] select-none ${
+              filterStatus === 'ALL'
+                ? 'border-primary ring-2 ring-primary/40 bg-primary/10 shadow-sm'
+                : 'border-primary/20 bg-primary/5 hover:border-primary/40'
+            }`}
+          >
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-muted-foreground">Tổng thiết bị</span>
               <Package className="w-4 h-4 text-primary" />
             </div>
             <div className="text-2xl font-bold mt-1 text-foreground">{statsTrưởngKhoa.total}</div>
-            <div className="text-[11px] text-muted-foreground mt-0.5">Mục đang mượn</div>
+            <div className="text-[11px] text-muted-foreground mt-0.5 flex items-center justify-between">
+              <span>Mục đang mượn</span>
+              <span className={`text-[10px] font-medium underline ${filterStatus === 'ALL' ? 'text-primary font-bold' : ''}`}>Tất cả</span>
+            </div>
           </div>
 
-          <div className="p-3.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5">
+          <div 
+            onClick={() => setFilterStatus('CHUA_TRA')}
+            className={`p-3.5 rounded-xl border transition-all cursor-pointer hover:shadow-md hover:scale-[1.01] active:scale-[0.99] select-none ${
+              filterStatus === 'CHUA_TRA'
+                ? 'border-emerald-500 ring-2 ring-emerald-500/40 bg-emerald-500/15 shadow-sm'
+                : 'border-emerald-500/20 bg-emerald-500/5 hover:border-emerald-500/40'
+            }`}
+          >
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-emerald-700">Đang sử dụng</span>
               <CheckCircle2 className="w-4 h-4 text-emerald-600" />
             </div>
             <div className="text-2xl font-bold mt-1 text-emerald-700">{statsTrưởngKhoa.using}</div>
-            <div className="text-[11px] text-emerald-600/80 mt-0.5">Hoạt động bình thường</div>
+            <div className="text-[11px] text-emerald-600/80 mt-0.5 flex items-center justify-between">
+              <span>Bình thường</span>
+              <span className={`text-[10px] font-medium underline ${filterStatus === 'CHUA_TRA' ? 'text-emerald-800 font-bold' : ''}`}>Lọc mục này</span>
+            </div>
           </div>
 
-          <div className="p-3.5 rounded-xl border border-amber-500/20 bg-amber-500/5">
+          <div 
+            onClick={() => setFilterStatus('YEU_CAU_TRA')}
+            className={`p-3.5 rounded-xl border transition-all cursor-pointer hover:shadow-md hover:scale-[1.01] active:scale-[0.99] select-none ${
+              filterStatus === 'YEU_CAU_TRA'
+                ? 'border-amber-500 ring-2 ring-amber-500/40 bg-amber-500/15 shadow-sm'
+                : 'border-amber-500/20 bg-amber-500/5 hover:border-amber-500/40'
+            }`}
+          >
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-amber-700">Chờ duyệt trả</span>
               <Clock className="w-4 h-4 text-amber-600" />
             </div>
             <div className="text-2xl font-bold mt-1 text-amber-700">{statsTrưởngKhoa.returning}</div>
-            <div className="text-[11px] text-amber-600/80 mt-0.5">Đã gửi yêu cầu trả</div>
+            <div className="text-[11px] text-amber-600/80 mt-0.5 flex items-center justify-between">
+              <span>Đã gửi yêu cầu</span>
+              <span className={`text-[10px] font-medium underline ${filterStatus === 'YEU_CAU_TRA' ? 'text-amber-800 font-bold' : ''}`}>Lọc mục này</span>
+            </div>
           </div>
 
-          <div className="p-3.5 rounded-xl border border-purple-500/20 bg-purple-500/5">
+          <div 
+            onClick={() => setFilterStatus('DA_GIA_HAN')}
+            className={`p-3.5 rounded-xl border transition-all cursor-pointer hover:shadow-md hover:scale-[1.01] active:scale-[0.99] select-none ${
+              filterStatus === 'DA_GIA_HAN'
+                ? 'border-purple-500 ring-2 ring-purple-500/40 bg-purple-500/15 shadow-sm'
+                : 'border-purple-500/20 bg-purple-500/5 hover:border-purple-500/40'
+            }`}
+          >
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-purple-700">Đã gia hạn</span>
               <AlertTriangle className="w-4 h-4 text-purple-600" />
             </div>
             <div className="text-2xl font-bold mt-1 text-purple-700">{statsTrưởngKhoa.extended}</div>
-            <div className="text-[11px] text-purple-600/80 mt-0.5">Gia hạn thời gian</div>
+            <div className="text-[11px] text-purple-600/80 mt-0.5 flex items-center justify-between">
+              <span>Gia hạn mượn</span>
+              <span className={`text-[10px] font-medium underline ${filterStatus === 'DA_GIA_HAN' ? 'text-purple-800 font-bold' : ''}`}>Lọc mục này</span>
+            </div>
           </div>
 
-          <div className="p-3.5 rounded-xl border border-blue-500/20 bg-blue-500/5 col-span-2 sm:col-span-1">
+          <div 
+            onClick={() => setDeptInstancesModalOpen(true)}
+            className="p-3.5 rounded-xl border border-blue-500/30 bg-blue-500/5 hover:bg-blue-500/10 col-span-2 sm:col-span-1 transition-all cursor-pointer hover:shadow-md hover:scale-[1.01] active:scale-[0.99] hover:border-blue-500 select-none"
+          >
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-blue-700">Máy cá thể</span>
               <Cpu className="w-4 h-4 text-blue-600" />
             </div>
             <div className="text-2xl font-bold mt-1 text-blue-700">{statsTrưởngKhoa.instancesCount}</div>
-            <div className="text-[11px] text-blue-600/80 mt-0.5">Máy vật lý tại khoa</div>
+            <div className="text-[11px] text-blue-600/80 mt-0.5 flex items-center justify-between font-medium">
+              <span>Máy tại khoa</span>
+              <span className="text-[10px] underline flex items-center gap-0.5 text-blue-700 font-semibold">Bấm xem máy <ArrowRight className="w-2.5 h-2.5" /></span>
+            </div>
           </div>
         </div>
       )}
@@ -951,6 +998,92 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>Hủy</Button>
             <Button onClick={handleSave} disabled={saving} className="gradient-primary text-white">{saving ? 'Đang lưu...' : 'Lưu thay đổi'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL DANH SÁCH MÁY CÁ THỂ VẬT LÝ TẠI KHOA */}
+      <Dialog open={deptInstancesModalOpen} onOpenChange={setDeptInstancesModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col p-0">
+          <DialogHeader className="p-6 border-b">
+            <div className="flex items-center justify-between">
+              <div>
+                <DialogTitle className="flex items-center gap-2 text-lg">
+                  <Cpu className="w-5 h-5 text-primary" />
+                  Danh sách máy cá thể vật lý tại khoa ({deptInstances.length} máy)
+                </DialogTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Đây là các máy vật lý cụ thể đang đặt tại khoa, mỗi máy có số Serial Number, mã cá thể riêng và tem nhãn QR dán trên thân máy.
+                </p>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="p-6 overflow-y-auto flex-1">
+            {deptInstances.length === 0 ? (
+              <div className="text-center py-12 border border-dashed rounded-xl bg-muted/20">
+                <Cpu className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
+                <p className="text-muted-foreground font-medium">Hiện chưa có máy cá thể nào được bàn giao hoặc ghi nhận tại khoa này.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-border/50">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/50">
+                      <th className="text-left p-3 font-medium text-muted-foreground">Mã cá thể</th>
+                      <th className="text-left p-3 font-medium text-muted-foreground">Thiết bị</th>
+                      <th className="text-left p-3 font-medium text-muted-foreground">Số Serial</th>
+                      <th className="text-center p-3 font-medium text-muted-foreground">Trạng thái</th>
+                      <th className="text-center p-3 font-medium text-muted-foreground">Hạn trả</th>
+                      <th className="text-right p-3 font-medium text-muted-foreground">Tem QR Code</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    {deptInstances.map(inst => (
+                      <tr key={inst.maCaThe} className="hover:bg-muted/30">
+                        <td className="p-3 font-mono font-bold text-xs text-primary">
+                          {inst.maCaThe}
+                        </td>
+                        <td className="p-3">
+                          <div className="font-medium text-foreground">{inst.tenThietBi}</div>
+                          <div className="text-xs text-muted-foreground font-mono">{inst.maThietBi}</div>
+                        </td>
+                        <td className="p-3 font-mono text-xs text-muted-foreground">
+                          {inst.serialNumber || '—'}
+                        </td>
+                        <td className="p-3 text-center">
+                          {inst.trangThai === 'DANG_BAO_TRI' ? (
+                            <Badge className="bg-amber-500/10 text-amber-700 border-amber-500/30">Đang bảo trì</Badge>
+                          ) : (
+                            <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/30">Đang sử dụng</Badge>
+                          )}
+                        </td>
+                        <td className="p-3 text-center text-xs">
+                          <span className={inst.soNgayConLai !== null && inst.soNgayConLai < 0 ? 'text-destructive font-semibold' : 'text-muted-foreground'}>
+                            {inst.ngayTraDuKien ? new Date(inst.ngayTraDuKien).toLocaleDateString('vi-VN') : '—'}
+                          </span>
+                        </td>
+                        <td className="p-3 text-right">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-xs border-primary/30 text-primary hover:bg-primary/10 gap-1 rounded-md shadow-none"
+                            onClick={() => setQrModalItem(inst)}
+                          >
+                            <QrCode className="w-3.5 h-3.5" /> Xem tem QR
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="p-4 border-t bg-muted/10">
+            <Button variant="outline" onClick={() => setDeptInstancesModalOpen(false)}>Đóng</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
