@@ -491,7 +491,7 @@ export default function MaintenancePage() {
       });
       setSystemNotifs(prev => prev.map(n => n.id === id ? { ...n, daDoc: true } : n));
       window.dispatchEvent(new Event('store_notifications_changed'));
-    } catch (e) {}
+    } catch (e) { }
   };
 
   const handleReadAllNotifications = async () => {
@@ -499,16 +499,16 @@ export default function MaintenancePage() {
     try {
       await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'}/notifications/read-all`, {
         method: 'PUT',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('auth_token')}` 
+          Authorization: `Bearer ${localStorage.getItem('auth_token')}`
         },
         body: JSON.stringify({ userId: user.maNguoiDung })
       });
       setSystemNotifs(prev => prev.map(n => ({ ...n, daDoc: true })));
       window.dispatchEvent(new Event('store_notifications_changed'));
       toast({ title: 'Thành công', description: 'Đã đánh dấu đã đọc tất cả thông báo bảo trì.' });
-    } catch (e) {}
+    } catch (e) { }
   };
 
   useEffect(() => {
@@ -568,7 +568,7 @@ export default function MaintenancePage() {
 
         const isStaffKhoOrAdmin = user?.vaiTro === 'ADMIN' || user?.vaiTro === 'QL_KHO' || user?.vaiTro === 'NV_KHO';
         const nguoiGiaoName = nguoiThucHien || (isStaffKhoOrAdmin ? (user?.hoTen || 'Kỹ thuật viên TTB Y tế') : 'Kỹ sư Quản lý TBYT');
-        const nguoiNhanName = isStaffKhoOrAdmin 
+        const nguoiNhanName = isStaffKhoOrAdmin
           ? (selectedDevice.dangSuDung ? `Cán bộ phụ trách - ${selectedDevice.viTriHienTai}` : 'Thủ kho Tiếp nhận')
           : (user?.hoTen || `Đại diện ${selectedDevice.viTriHienTai}`);
 
@@ -642,27 +642,27 @@ export default function MaintenancePage() {
   });
 
   // 1. Danh sách thiết bị ĐÃ ĐẾN HẠN hoặc QUÁ HẠN bảo trì (hôm nay hoặc đã trễ)
-  const dueItems = data.filter(item => 
-    item.trangThaiBaoTri === 'QUA_HAN' || 
+  const dueItems = data.filter(item =>
+    item.trangThaiBaoTri === 'QUA_HAN' ||
     (item.soNgayConLai !== null && item.soNgayConLai <= 0 && item.trangThaiBaoTri !== 'DANG_BAO_TRI')
   );
 
   // 2. Danh sách thiết bị CHUẨN BỊ ĐẾN HẠN bảo trì (trong vòng 15 ngày tới: 0 < soNgayConLai <= 15)
-  const upcomingItems = data.filter(item => 
+  const upcomingItems = data.filter(item =>
     item.trangThaiBaoTri !== 'QUA_HAN' &&
     item.trangThaiBaoTri !== 'DANG_BAO_TRI' &&
-    ((item.trangThaiBaoTri === 'SAP_DEN_HAN' && (item.soNgayConLai === null || item.soNgayConLai > 0)) || 
-     (item.soNgayConLai !== null && item.soNgayConLai > 0 && item.soNgayConLai <= 15))
+    ((item.trangThaiBaoTri === 'SAP_DEN_HAN' && (item.soNgayConLai === null || item.soNgayConLai > 0)) ||
+      (item.soNgayConLai !== null && item.soNgayConLai > 0 && item.soNgayConLai <= 15))
   );
 
   // 3. Toàn bộ thiết bị cảnh báo cần bảo trì
   const allAlertItems = [...dueItems, ...upcomingItems];
 
-  const displayedAlertItems = alertTab === 'DUE' 
-    ? dueItems 
-    : alertTab === 'UPCOMING' 
-    ? upcomingItems 
-    : allAlertItems;
+  const displayedAlertItems = alertTab === 'DUE'
+    ? dueItems
+    : alertTab === 'UPCOMING'
+      ? upcomingItems
+      : allAlertItems;
 
   const unreadSystemNotifs = systemNotifs.filter(n => !n.daDoc).length;
 
@@ -672,12 +672,12 @@ export default function MaintenancePage() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-card p-5 rounded-2xl border shadow-sm">
         <div>
           <h2 className="text-xl font-bold flex items-center gap-2.5 text-primary">
-            <Wrench className="w-6 h-6 text-primary" /> 
+            <Wrench className="w-6 h-6 text-primary" />
             {deptInfo.isDept ? `Theo dõi Bảo trì Thiết bị — ${deptInfo.tenKhoa || 'Khoa'}` : 'Quản lý Bảo trì & Kiểm định Thiết bị'}
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
-            {deptInfo.isDept 
-              ? `Theo dõi chu kỳ kiểm định các thiết bị mà ${deptInfo.tenKhoa || 'khoa'} đang mượn sử dụng để chủ động phối hợp bảo dưỡng` 
+            {deptInfo.isDept
+              ? `Theo dõi chu kỳ kiểm định các thiết bị mà ${deptInfo.tenKhoa || 'khoa'} đang mượn sử dụng để chủ động phối hợp bảo dưỡng`
               : 'Theo dõi chu kỳ kiểm định, cảnh báo quá hạn và ghi nhận nhật ký bảo dưỡng định kỳ trang thiết bị y tế toàn viện'}
           </p>
         </div>
@@ -727,7 +727,7 @@ export default function MaintenancePage() {
           )}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-muted-foreground uppercase">Tổng thiết bị</span>
+            <span className="text-xs font-semibold text-muted-foreground uppercase">Thiết bị</span>
             <ShieldCheck className="w-4 h-4 text-primary" />
           </div>
           <div className="text-2xl font-bold mt-2 text-foreground">{summary.tongSo || 0}</div>
@@ -804,8 +804,8 @@ export default function MaintenancePage() {
           <div className="flex items-start sm:items-center gap-3">
             <div className={cn(
               "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-sm transition-all",
-              allAlertItems.length > 0 
-                ? "bg-amber-500 text-white animate-pulse shadow-amber-500/20" 
+              allAlertItems.length > 0
+                ? "bg-amber-500 text-white animate-pulse shadow-amber-500/20"
                 : "bg-success/20 text-success"
             )}>
               <BellRing className="w-5 h-5" />
@@ -957,9 +957,9 @@ export default function MaintenancePage() {
                             </div>
                             <div className="min-w-0">
                               <div className="flex items-center gap-1.5 flex-wrap">
-                                <h5 className="font-bold text-sm text-foreground hover:text-primary transition-colors cursor-pointer" 
-                                    onClick={() => setSearch(item.maThietBi)}
-                                    title={item.tenThietBi}>
+                                <h5 className="font-bold text-sm text-foreground hover:text-primary transition-colors cursor-pointer"
+                                  onClick={() => setSearch(item.maThietBi)}
+                                  title={item.tenThietBi}>
                                   {item.tenThietBi}
                                 </h5>
                                 <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-background/90 border font-semibold text-foreground/80">
@@ -1036,8 +1036,8 @@ export default function MaintenancePage() {
                                 onClick={() => handleOpenCompleteModal(item)}
                                 className={cn(
                                   "h-7 text-xs px-2.5 gap-1 shadow-xs text-white",
-                                  isOverdue || isDueToday 
-                                    ? "bg-rose-600 hover:bg-rose-700" 
+                                  isOverdue || isDueToday
+                                    ? "bg-rose-600 hover:bg-rose-700"
                                     : "bg-amber-600 hover:bg-amber-700"
                                 )}
                               >
@@ -1148,13 +1148,13 @@ export default function MaintenancePage() {
                             <span className={cn(
                               "text-[10px] font-medium mt-0.5",
                               isOverdue ? "text-destructive font-bold" :
-                              isNearDue ? "text-amber-600 font-bold" : "text-muted-foreground"
+                                isNearDue ? "text-amber-600 font-bold" : "text-muted-foreground"
                             )}>
                               {item.soNgayConLai < 0
                                 ? `Trễ ${Math.abs(item.soNgayConLai)} ngày`
                                 : item.soNgayConLai === 0
-                                ? "Đến hạn hôm nay"
-                                : `Còn ${item.soNgayConLai} ngày`}
+                                  ? "Đến hạn hôm nay"
+                                  : `Còn ${item.soNgayConLai} ngày`}
                             </span>
                           )}
                         </div>
@@ -1167,9 +1167,9 @@ export default function MaintenancePage() {
                       <span className={cn(
                         "inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border",
                         isOverdue ? "bg-destructive/10 text-destructive border-destructive/20" :
-                        isNearDue ? "bg-amber-500/10 text-amber-600 border-amber-500/20" :
-                        isUnderMaint ? "bg-orange-500/10 text-orange-600 border-orange-500/20" :
-                        "bg-success/10 text-success border-success/20"
+                          isNearDue ? "bg-amber-500/10 text-amber-600 border-amber-500/20" :
+                            isUnderMaint ? "bg-orange-500/10 text-orange-600 border-orange-500/20" :
+                              "bg-success/10 text-success border-success/20"
                       )}>
                         {isOverdue && <AlertTriangle className="w-3 h-3" />}
                         {isNearDue && <Clock className="w-3 h-3" />}
@@ -1219,7 +1219,7 @@ export default function MaintenancePage() {
 
           {filteredData.length === 0 && (
             <div className="text-center py-12 text-muted-foreground">
-              {deptInfo.isDept 
+              {deptInfo.isDept
                 ? `Hiện tại ${deptInfo.tenKhoa || 'khoa'} chưa mượn thiết bị tái sử dụng nào cần theo dõi bảo trì.`
                 : 'Không tìm thấy thiết bị nào phù hợp với bộ lọc.'}
             </div>
@@ -1420,7 +1420,7 @@ export default function MaintenancePage() {
                         </span>
                         <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
                           {rec.loaiBaoTri === 'DINH_KY' ? 'Bảo dưỡng định kỳ' :
-                           rec.loaiBaoTri === 'KIEM_DINH' ? 'Kiểm định / Hiệu chuẩn' : 'Sửa chữa'}
+                            rec.loaiBaoTri === 'KIEM_DINH' ? 'Kiểm định / Hiệu chuẩn' : 'Sửa chữa'}
                         </span>
                       </div>
                       <span className="text-xs text-muted-foreground">

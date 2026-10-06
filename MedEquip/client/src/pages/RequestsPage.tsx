@@ -1,15 +1,15 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { store } from '@/lib/store';
 import { apiCreateRequest, apiScanRequest, apiProcessRequestItems, apiMarkAllAsRead } from '@/lib/apiSync';
-import { PhieuYeuCauCapPhat, ThietBi } from '@/types';
+import { PhieuYeuCauCapPhat, ThietBi, LoaiDeXuat } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { toast } from '@/hooks/use-toast';
-import { Search, CheckCheck, ShoppingCart, Plus, Minus, X, Trash2, Box, Camera, QrCode, RotateCcw, PackageCheck, ClipboardList, AlertCircle, Upload, Keyboard, Bell, Download, ImagePlus, FileText, Printer } from 'lucide-react';
+import { Search, Check, CheckCheck, ShoppingCart, Plus, Minus, X, Trash2, Box, Camera, QrCode, RotateCcw, PackageCheck, ClipboardList, AlertCircle, Upload, Keyboard, Bell, Download, ImagePlus, FileText, Printer, ArrowRightLeft, ShoppingBag, Wrench, Layers, Send, CheckCircle2, Building2, Eye } from 'lucide-react';
 import { fetchApi } from '@/services/api';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -51,7 +51,8 @@ const STATUS_MAP = {
   DA_QL_KHO_DUYET: 'Chờ cấp phát',
   TU_CHOI: 'Từ chối',
   DA_CAP_PHAT: 'Đã cấp phát',
-  DA_HUY: 'Đã hủy'
+  DA_HUY: 'Đã hủy',
+  HOAN_THANH: 'Hoàn thành'
 } as const;
 
 const STATUS_COLORS = {
@@ -62,7 +63,15 @@ const STATUS_COLORS = {
   DA_QL_KHO_DUYET: 'bg-blue-100 text-blue-700 border-blue-200',
   TU_CHOI: 'bg-destructive/10 text-destructive border-destructive/20',
   DA_CAP_PHAT: 'bg-success/10 text-success border-success/20',
-  DA_HUY: 'bg-gray-100 text-gray-700 border-gray-200'
+  DA_HUY: 'bg-gray-100 text-gray-700 border-gray-200',
+  HOAN_THANH: 'bg-emerald-100 text-emerald-700 border-emerald-300'
+};
+
+const PROPOSAL_TYPE_MAP: Record<string, { label: string; badgeClass: string; icon: any }> = {
+  CAP_PHAT: { label: 'Cấp phát kho', badgeClass: 'bg-blue-100 text-blue-700 border-blue-200', icon: ShoppingCart },
+  DIEU_CHUYEN: { label: 'Điều chuyển khoa', badgeClass: 'bg-purple-100 text-purple-700 border-purple-200', icon: ArrowRightLeft },
+  MUA_SAM: { label: 'Mua sắm mới', badgeClass: 'bg-amber-100 text-amber-700 border-amber-200', icon: ShoppingBag },
+  BAO_HONG: { label: 'Báo hỏng sửa chữa', badgeClass: 'bg-rose-100 text-rose-700 border-rose-200', icon: Wrench }
 };
 
 export default function RequestsPage() {
@@ -89,8 +98,33 @@ export default function RequestsPage() {
   });
   const unreadNotifs = notifications.filter(n => !n.daDoc).length;
 
-  // Lọc tùy chỉnh
+  // Lọc tùy chỉnh & Lọc phân loại đề xuất
   const [filterDept, setFilterDept] = useState('all');
+  const [tabProposal, setTabProposal] = useState<'ALL' | 'CAP_PHAT' | 'DIEU_CHUYEN' | 'MUA_SAM' | 'BAO_HONG'>('ALL');
+
+  // Modal tạo đề xuất mới
+  const [newProposalOpen, setNewProposalOpen] = useState(false);
+  const [proposalType, setProposalType] = useState<'DIEU_CHUYEN' | 'MUA_SAM' | 'BAO_HONG'>('DIEU_CHUYEN');
+
+  // Dữ liệu cho Điều chuyển & Báo hỏng (lấy từ cá thể máy khoa đang giữ)
+  const [deptInstances, setDeptInstances] = useState<any[]>([]);
+  const [loadingDeptInstances, setLoadingDeptInstances] = useState(false);
+  const [transferInstance, setTransferInstance] = useState('');
+  const [transferDestDept, setTransferDestDept] = useState('');
+  const [transferReason, setTransferReason] = useState('');
+
+  // Dữ liệu cho Mua sắm mới
+  const [purchaseName, setPurchaseName] = useState('');
+  const [purchaseSpecs, setPurchaseSpecs] = useState('');
+  const [purchaseQty, setPurchaseQty] = useState(1);
+  const [purchaseUnit, setPurchaseUnit] = useState('Cái');
+  const [purchaseBudget, setPurchaseBudget] = useState<number | ''>('');
+  const [purchaseReason, setPurchaseReason] = useState('');
+
+  // Dữ liệu cho Báo hỏng
+  const [damageInstance, setDamageInstance] = useState('');
+  const [damagePriority, setDamagePriority] = useState<'BINH_THUONG' | 'KHAN_CAP'>('BINH_THUONG');
+  const [damageDescription, setDamageDescription] = useState('');
 
   // Trạng thái giỏ hàng
   const [cartOpen, setCartOpen] = useState(false);
@@ -117,7 +151,8 @@ export default function RequestsPage() {
 
   // MỚI: Trạng thái xử lý nhiều thiết bị
   const [processingRequest, setProcessingRequest] = useState<any>(null);
-  const [processItems, setProcessItems] = useState<{ maThietBi: string; approved: boolean; lyDo: string }[]>([]);
+  const [processItems, setProcessItems] = useState<{ maThietBi: string; approved: boolean; lyDo: string; selectedInstances?: string[] }[]>([]);
+  const [warehouseAvailableInstances, setWarehouseAvailableInstances] = useState<Record<string, any[]>>({});
   const [processGhiChu, setProcessGhiChu] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -134,6 +169,42 @@ export default function RequestsPage() {
   // Trạng thái Biểu mẫu xem trước & in
   const [previewReq, setPreviewReq] = useState<any | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewAssignedInstances, setPreviewAssignedInstances] = useState<any[]>([]);
+
+  const loadDeptInstances = async (deptCode?: string) => {
+    const code = deptCode || user?.maKhoa || khoaYeuCau;
+    if (!code) return;
+    setLoadingDeptInstances(true);
+    try {
+      const data = await fetchApi<any[]>(`/instances/department/${encodeURIComponent(code)}`);
+      if (Array.isArray(data)) {
+        setDeptInstances(data);
+      } else {
+        setDeptInstances([]);
+      }
+    } catch (e) {
+      console.error(e);
+      setDeptInstances([]);
+    } finally {
+      setLoadingDeptInstances(false);
+    }
+  };
+
+  useEffect(() => {
+    if (previewOpen && previewReq?.maPhieu) {
+      fetchApi<any>(`/instances/lookup/${encodeURIComponent(previewReq.maPhieu)}`)
+        .then(res => {
+          if (res.found && res.instances) {
+            setPreviewAssignedInstances(res.instances);
+          } else {
+            setPreviewAssignedInstances([]);
+          }
+        })
+        .catch(() => setPreviewAssignedInstances([]));
+    } else if (!previewOpen) {
+      setPreviewAssignedInstances([]);
+    }
+  }, [previewOpen, previewReq?.maPhieu]);
 
   // Trạng thái ảnh chứng minh cho NV Kho khi cấp phát
   const [proofImage, setProofImage] = useState<string | null>(null);
@@ -174,11 +245,15 @@ export default function RequestsPage() {
     }
 
     return list.filter(r => {
-      const matchSearch = r.maPhieu.toLowerCase().includes(search.toLowerCase());
-      const matchDept = filterDept === 'all' || r.maKhoa === filterDept;
-      return matchSearch && matchDept;
+      const matchSearch = r.maPhieu.toLowerCase().includes(search.toLowerCase()) ||
+        (r.tenThietBiMoi && r.tenThietBiMoi.toLowerCase().includes(search.toLowerCase())) ||
+        (r.maCaThe && r.maCaThe.toLowerCase().includes(search.toLowerCase())) ||
+        (r.lyDo && r.lyDo.toLowerCase().includes(search.toLowerCase()));
+      const matchDept = filterDept === 'all' || r.maKhoa === filterDept || r.maKhoaNhan === filterDept;
+      const matchProposal = tabProposal === 'ALL' || (r.loaiDeXuat || 'CAP_PHAT') === tabProposal;
+      return matchSearch && matchDept && matchProposal;
     });
-  }, [requests, search, isTroLy, isTruongKhoa, isQlKho, isNvkho, user, filterDept]);
+  }, [requests, search, isTroLy, isTruongKhoa, isQlKho, isNvkho, user, filterDept, tabProposal]);
 
   // Xử lý logic giỏ hàng
   const addToCart = (tb: ThietBi) => {
@@ -248,6 +323,7 @@ export default function RequestsPage() {
       const result = await apiCreateRequest({
         maNguoiYeuCau: user!.maNguoiDung,
         maKhoa: isKhoa ? user?.maKhoa : khoaYeuCau,
+        loaiDeXuat: 'CAP_PHAT',
         lyDo,
         items: cart.map(item => ({
           maThietBi: item.tb.maThietBi,
@@ -271,6 +347,122 @@ export default function RequestsPage() {
         toast({ title: 'Thành công', description: `Đã gửi yêu cầu cấp phát.` });
       } else {
         toast({ title: 'Lỗi', description: result.message, variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Lỗi', description: err.message, variant: 'destructive' });
+    }
+  };
+
+  // Xử lý gửi Đề xuất Điều chuyển
+  const handleSubmitTransfer = async () => {
+    if (!transferInstance) return toast({ title: 'Thiếu thông tin', description: 'Vui lòng chọn thiết bị cần điều chuyển.', variant: 'destructive' });
+    if (!transferDestDept) return toast({ title: 'Thiếu thông tin', description: 'Vui lòng chọn khoa tiếp nhận.', variant: 'destructive' });
+    const currentDept = user?.maKhoa || khoaYeuCau;
+    if (transferDestDept === currentDept) return toast({ title: 'Không hợp lệ', description: 'Khoa tiếp nhận phải khác khoa hiện tại.', variant: 'destructive' });
+    if (!transferReason.trim()) return toast({ title: 'Thiếu thông tin', description: 'Vui lòng nhập lý do điều chuyển thiết bị.', variant: 'destructive' });
+
+    try {
+      const selectedInst = deptInstances.find(i => i.maCaThe === transferInstance);
+      const res = await apiCreateRequest({
+        maNguoiYeuCau: user?.maNguoiDung,
+        maKhoa: currentDept,
+        loaiDeXuat: 'DIEU_CHUYEN',
+        maKhoaNhan: transferDestDept,
+        maCaThe: transferInstance,
+        lyDo: transferReason,
+        items: [{
+          maThietBi: selectedInst?.maThietBi || 'TB',
+          soLuong: 1,
+          donVi: selectedInst?.donViCoSo || 'Cái'
+        }]
+      });
+
+      if (res.success) {
+        toast({ title: 'Thành công', description: 'Đã gửi đề xuất điều chuyển thiết bị sang khoa nhận.' });
+        setNewProposalOpen(false);
+        setTransferInstance('');
+        setTransferDestDept('');
+        setTransferReason('');
+        await refreshRequests();
+      } else {
+        toast({ title: 'Lỗi', description: res.message || 'Không thể tạo đề xuất.', variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Lỗi', description: err.message, variant: 'destructive' });
+    }
+  };
+
+  // Xử lý gửi Đề xuất Mua sắm mới
+  const handleSubmitPurchase = async () => {
+    if (!purchaseName.trim()) return toast({ title: 'Thiếu thông tin', description: 'Vui lòng nhập tên trang thiết bị cần mua sắm.', variant: 'destructive' });
+    if (!purchaseReason.trim()) return toast({ title: 'Thiếu thông tin', description: 'Vui lòng nhập lý do / sự cần thiết mua sắm.', variant: 'destructive' });
+    if (purchaseQty <= 0) return toast({ title: 'Không hợp lệ', description: 'Số lượng phải lớn hơn 0.', variant: 'destructive' });
+
+    try {
+      const res = await apiCreateRequest({
+        maNguoiYeuCau: user?.maNguoiDung,
+        maKhoa: user?.maKhoa || khoaYeuCau,
+        loaiDeXuat: 'MUA_SAM',
+        tenThietBiMoi: purchaseName,
+        quyCachKyThuat: purchaseSpecs,
+        soLuong: purchaseQty,
+        donViTinh: purchaseUnit,
+        duToanKinhPhi: typeof purchaseBudget === 'number' ? purchaseBudget : 0,
+        lyDo: purchaseReason,
+        items: [{
+          maThietBi: 'NEW_PURCHASE',
+          soLuong: purchaseQty,
+          donVi: purchaseUnit
+        }]
+      });
+
+      if (res.success) {
+        toast({ title: 'Thành công', description: 'Đã gửi tờ trình đề xuất mua sắm thiết bị mới.' });
+        setNewProposalOpen(false);
+        setPurchaseName('');
+        setPurchaseSpecs('');
+        setPurchaseQty(1);
+        setPurchaseBudget('');
+        setPurchaseReason('');
+        await refreshRequests();
+      } else {
+        toast({ title: 'Lỗi', description: res.message || 'Không thể tạo tờ trình.', variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Lỗi', description: err.message, variant: 'destructive' });
+    }
+  };
+
+  // Xử lý gửi Báo hỏng & Sửa chữa
+  const handleSubmitDamage = async () => {
+    if (!damageInstance) return toast({ title: 'Thiếu thông tin', description: 'Vui lòng chọn thiết bị gặp sự cố / hư hỏng.', variant: 'destructive' });
+    if (!damageDescription.trim()) return toast({ title: 'Thiếu thông tin', description: 'Vui lòng mô tả hiện trạng hư hỏng của máy.', variant: 'destructive' });
+
+    try {
+      const selectedInst = deptInstances.find(i => i.maCaThe === damageInstance);
+      const res = await apiCreateRequest({
+        maNguoiYeuCau: user?.maNguoiDung,
+        maKhoa: user?.maKhoa || khoaYeuCau,
+        loaiDeXuat: 'BAO_HONG',
+        maCaThe: damageInstance,
+        mucDoUuTien: damagePriority,
+        lyDo: damageDescription,
+        items: [{
+          maThietBi: selectedInst?.maThietBi || 'TB',
+          soLuong: 1,
+          donVi: selectedInst?.donViCoSo || 'Cái'
+        }]
+      });
+
+      if (res.success) {
+        toast({ title: 'Thành công', description: 'Đã gửi biên bản báo hỏng và đề nghị bảo trì sửa chữa.' });
+        setNewProposalOpen(false);
+        setDamageInstance('');
+        setDamageDescription('');
+        setDamagePriority('BINH_THUONG');
+        await refreshRequests();
+      } else {
+        toast({ title: 'Lỗi', description: res.message || 'Không thể tạo biên bản.', variant: 'destructive' });
       }
     } catch (err: any) {
       toast({ title: 'Lỗi', description: err.message, variant: 'destructive' });
@@ -305,19 +497,35 @@ export default function RequestsPage() {
     try {
       const result = await apiScanRequest(maPhieu);
       if (result.success) {
-        // Đính kèm danh sách thiết bị vào đối tượng yêu cầu để Dialog có thể truy cập
+        const rawItems = (result.items && result.items.length > 0)
+          ? result.items
+          : [{ maThietBi: result.request.maThietBi || 'TB', trangThai: result.request.trangThai, lyDoTuChoi: '' }];
+
         const requestWithItems = {
           ...result.request,
-          items: result.items
+          items: rawItems
         };
         setProcessingRequest(requestWithItems);
 
-        setProcessItems(result.items.map((i: any) => ({
+        setProcessItems(rawItems.map((i: any) => ({
           maThietBi: i.maThietBi,
           approved: i.trangThai !== 'TU_CHOI' && i.trangThai !== 'DA_HUY',
-          lyDo: i.lyDoTuChoi || ''
+          lyDo: i.lyDoTuChoi || '',
+          selectedInstances: []
         })));
         setAllocateOpen(true);
+
+        // Nạp danh sách máy có sẵn trong kho cho từng thiết bị
+        if (Array.isArray(result.items)) {
+          for (const it of result.items) {
+            try {
+              const insts = await fetchApi<any[]>(`/instances/available/${it.maThietBi}`);
+              if (Array.isArray(insts)) {
+                setWarehouseAvailableInstances(prev => ({ ...prev, [it.maThietBi]: insts }));
+              }
+            } catch (e) {}
+          }
+        }
       } else {
         toast({ title: 'Lỗi', description: result.message, variant: 'destructive' });
       }
@@ -540,9 +748,12 @@ export default function RequestsPage() {
     try {
       const doc = new jsPDF();
       const khoa = departments.find(k => k.maKhoa === r.maKhoa);
+      const khoaNhan = departments.find(k => k.maKhoa === r.maKhoaNhan);
       const requester = users.find(u => u.maNguoiDung === r.maNguoiYeuCau);
       const tenNguoiYeuCau = requester?.hoTen || r.maNguoiYeuCau || 'Trợ lý khoa';
       const tenKhoa = khoa?.tenKhoa || r.maKhoa;
+      const tenKhoaNhan = khoaNhan?.tenKhoa || r.maKhoaNhan || 'Khoa tiếp nhận';
+      const loai = r.loaiDeXuat || 'CAP_PHAT';
 
       doc.setFontSize(10);
       doc.text(removeVietnameseTones('BO Y TE - BENH VIEN MEDEQUIP'), 14, 15);
@@ -553,54 +764,113 @@ export default function RequestsPage() {
       doc.text(removeVietnameseTones('Doc lap - Tu do - Hanh phuc'), 196, 21, { align: 'right' });
       doc.line(135, 23, 196, 23);
 
-      doc.setFontSize(15);
+      doc.setFontSize(14);
       doc.setFont('helvetica', 'bold');
-      doc.text(removeVietnameseTones('GIAY DE NGHI CAP PHAT THIET BI Y TE'), 105, 38, { align: 'center' });
 
-      doc.setFontSize(10);
+      let titleText = 'GIAY DE NGHI CAP PHAT THIET BI Y TE';
+      let subTitleText = '(Dung cho Tro ly / Khoa phong de nghi cap phat thiet bi y te)';
+
+      if (loai === 'DIEU_CHUYEN') {
+        titleText = 'BIEN BAN DIEU CHUYEN TRANG THIET BI Y TE';
+        subTitleText = '(Dieu chuyen trang thiet bi y te giua cac khoa phong noi vien)';
+      } else if (loai === 'MUA_SAM') {
+        titleText = 'TO TRINH DE XUAT MUA SAM THIET BI Y TE MOI';
+        subTitleText = '(Kinh gui: Ban Giam Doc & Phong Vat tu - Trang thiet bi y te)';
+      } else if (loai === 'BAO_HONG') {
+        titleText = 'BIEN BAN BAO HONG VA DE NGHI BAO TRI SUA CHUA';
+        subTitleText = '(Dung cho cac khoa phong khi phat sinh su co hu hong thiet bi)';
+      }
+
+      doc.text(removeVietnameseTones(titleText), 105, 38, { align: 'center' });
+
+      doc.setFontSize(9);
       doc.setFont('helvetica', 'italic');
-      doc.text(removeVietnameseTones('(Dung cho Tro ly / Khoa phong de nghi cap phat thiet bi y te)'), 105, 44, { align: 'center' });
+      doc.text(removeVietnameseTones(subTitleText), 105, 44, { align: 'center' });
 
       doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
-      doc.text(removeVietnameseTones(`Don vi de nghi: ${tenKhoa}`), 14, 54);
-      doc.text(removeVietnameseTones(`Nguoi de nghi (Tro ly): ${tenNguoiYeuCau}`), 14, 61);
-      doc.text(removeVietnameseTones(`Ngay yeu cau: ${new Date(r.ngayTao).toLocaleString('vi-VN')}`), 14, 68);
-      doc.text(removeVietnameseTones(`Trang thai: ${STATUS_MAP[r.trangThai as keyof typeof STATUS_MAP] || r.trangThai}`), 14, 75);
-      doc.text(removeVietnameseTones(`Ly do / Muc dich: ${r.lyDo || 'Khong co ghi chu'}`), 14, 82);
-
-      const tableColumn = ["STT", "Ma TB", "Ten Thiet Bi Y Te", "DVT", "SL De Nghi", "Ghi Chu"].map(removeVietnameseTones);
-      const tableRows: any[] = [];
-
-      if (r.items && r.items.length > 0) {
-        r.items.forEach((item: any, i: number) => {
-          tableRows.push([
-            (i + 1).toString(),
-            item.maThietBi,
-            removeVietnameseTones(item.tenThietBi || item.maThietBi),
-            removeVietnameseTones(item.donVi || item.donViTinh || 'Cai'),
-            item.soLuongCoSo ? item.soLuongCoSo.toString() : (item.soLuong?.toString() || '1'),
-            removeVietnameseTones(item.ghiChu || '')
-          ]);
-        });
+      doc.text(removeVietnameseTones(`Don vi de nghi / bao cao: ${tenKhoa}`), 14, 54);
+      if (loai === 'DIEU_CHUYEN') {
+        doc.text(removeVietnameseTones(`Don vi tiep nhan: ${tenKhoaNhan}`), 14, 61);
+        doc.text(removeVietnameseTones(`Nguoi lap bien ban: ${tenNguoiYeuCau}`), 14, 68);
+        doc.text(removeVietnameseTones(`Ngay yeu cau: ${new Date(r.ngayTao).toLocaleString('vi-VN')}`), 14, 75);
+        doc.text(removeVietnameseTones(`Trang thai: ${STATUS_MAP[r.trangThai as keyof typeof STATUS_MAP] || r.trangThai}`), 14, 82);
+        doc.text(removeVietnameseTones(`Ly do dieu chuyen: ${r.lyDo || '---'}`), 14, 89);
+      } else if (loai === 'MUA_SAM') {
+        doc.text(removeVietnameseTones(`Nguoi lap to trinh: ${tenNguoiYeuCau}`), 14, 61);
+        doc.text(removeVietnameseTones(`Ngay de xuat: ${new Date(r.ngayTao).toLocaleString('vi-VN')}`), 14, 68);
+        doc.text(removeVietnameseTones(`Trang thai: ${STATUS_MAP[r.trangThai as keyof typeof STATUS_MAP] || r.trangThai}`), 14, 75);
+        doc.text(removeVietnameseTones(`Ly do & Su can thiet dau tu: ${r.lyDo || '---'}`), 14, 82);
+      } else if (loai === 'BAO_HONG') {
+        doc.text(removeVietnameseTones(`Nguoi bao hong: ${tenNguoiYeuCau}`), 14, 61);
+        doc.text(removeVietnameseTones(`Muc do uu tien: ${r.mucDoUuTien === 'KHAN_CAP' ? 'KHAN CAP' : 'Binh thuong'}`), 14, 68);
+        doc.text(removeVietnameseTones(`Ngay ghi nhan: ${new Date(r.ngayTao).toLocaleString('vi-VN')}`), 14, 75);
+        doc.text(removeVietnameseTones(`Mo ta su co / Hu hong: ${r.lyDo || '---'}`), 14, 82);
       } else {
-        tableRows.push(["1", r.maThietBi || '', removeVietnameseTones(r.tenThietBi || ''), 'Cai', r.soLuongYeuCau?.toString() || '1', '']);
+        doc.text(removeVietnameseTones(`Nguoi de nghi (Tro ly): ${tenNguoiYeuCau}`), 14, 61);
+        doc.text(removeVietnameseTones(`Ngay yeu cau: ${new Date(r.ngayTao).toLocaleString('vi-VN')}`), 14, 68);
+        doc.text(removeVietnameseTones(`Trang thai: ${STATUS_MAP[r.trangThai as keyof typeof STATUS_MAP] || r.trangThai}`), 14, 75);
+        doc.text(removeVietnameseTones(`Ly do / Muc dich: ${r.lyDo || 'Khong co ghi chu'}`), 14, 82);
+      }
+
+      let tableColumn: string[] = [];
+      let tableRows: any[] = [];
+      const startTableY = loai === 'DIEU_CHUYEN' ? 95 : 88;
+
+      if (loai === 'DIEU_CHUYEN') {
+        tableColumn = ["STT", "Ten Thiet Bi Y Te", "Ma Ca The", "Khoa Giao", "Khoa Nhan", "Tinh Trang Ban Giao"].map(removeVietnameseTones);
+        tableRows.push([
+          "1",
+          removeVietnameseTones(r.items?.[0]?.tenThietBi || r.maThietBi || 'Thiet bi y te'),
+          r.maCaThe || r.items?.[0]?.maCaThe || 'Chua gan',
+          removeVietnameseTones(tenKhoa),
+          removeVietnameseTones(tenKhoaNhan),
+          removeVietnameseTones('Hoat dong tot, day du phu kien')
+        ]);
+      } else if (loai === 'MUA_SAM') {
+        tableColumn = ["STT", "Ten Trang Thiet Bi", "Quy Cach Ky Thuat", "DVT", "SL", "Du Toan (VND)"].map(removeVietnameseTones);
+        const budgetStr = r.duToanKinhPhi ? r.duToanKinhPhi.toLocaleString('vi-VN') + ' VND' : 'Chua co';
+        tableRows.push([
+          "1",
+          removeVietnameseTones(r.tenThietBiMoi || 'Thiet bi de xuat moi'),
+          removeVietnameseTones(r.quyCachKyThuat || 'Tieu chuan Bo Y Te'),
+          removeVietnameseTones(r.items?.[0]?.donVi || 'Cai'),
+          (r.soLuongYeuCau || 1).toString(),
+          budgetStr
+        ]);
+      } else if (loai === 'BAO_HONG') {
+        tableColumn = ["STT", "Ten Thiet Bi", "Ma Ca The", "Uu Tien", "Mo Ta Su Co"].map(removeVietnameseTones);
+        tableRows.push([
+          "1",
+          removeVietnameseTones(r.items?.[0]?.tenThietBi || r.maThietBi || 'Thiet bi'),
+          r.maCaThe || '---',
+          removeVietnameseTones(r.mucDoUuTien === 'KHAN_CAP' ? 'KHAN CAP' : 'Binh thuong'),
+          removeVietnameseTones(r.lyDo || 'Can kiem tra bao tri')
+        ]);
+      } else {
+        tableColumn = ["STT", "Ma TB", "Ten Thiet Bi Y Te", "DVT", "SL De Nghi", "Ghi Chu"].map(removeVietnameseTones);
+        if (r.items && r.items.length > 0) {
+          r.items.forEach((item: any, i: number) => {
+            tableRows.push([
+              (i + 1).toString(),
+              item.maThietBi,
+              removeVietnameseTones(item.tenThietBi || item.maThietBi),
+              removeVietnameseTones(item.donVi || item.donViTinh || 'Cai'),
+              item.soLuongCoSo ? item.soLuongCoSo.toString() : (item.soLuong?.toString() || '1'),
+              removeVietnameseTones(item.ghiChu || '')
+            ]);
+          });
+        } else {
+          tableRows.push(["1", r.maThietBi || '', removeVietnameseTones(r.tenThietBi || ''), 'Cai', r.soLuongYeuCau?.toString() || '1', '']);
+        }
       }
 
       autoTable(doc, {
         head: [tableColumn],
         body: tableRows,
-        startY: 88,
+        startY: startTableY,
         styles: { fontSize: 9, cellPadding: 3 },
-        headStyles: { fillColor: [41, 128, 185], textColor: 255, halign: 'center' },
-        columnStyles: {
-          0: { halign: 'center', cellWidth: 12 },
-          1: { halign: 'center', cellWidth: 25 },
-          2: { cellWidth: 60 },
-          3: { halign: 'center', cellWidth: 18 },
-          4: { halign: 'center', cellWidth: 22 },
-          5: { cellWidth: 'auto' }
-        }
+        headStyles: { fillColor: [41, 128, 185], textColor: 255, halign: 'center' }
       });
 
       const finalY = (doc as any).lastAutoTable.finalY + 14;
@@ -615,30 +885,95 @@ export default function RequestsPage() {
 
       doc.setFontSize(10);
       doc.setFont('helvetica', 'bold');
-      doc.text(removeVietnameseTones('NGUOI DE NGHI'), 35, finalY + 8, { align: 'center' });
-      doc.setFont('helvetica', 'italic');
-      doc.setFontSize(8);
-      doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 35, finalY + 13, { align: 'center' });
 
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.text(removeVietnameseTones('TRUONG KHOA DUYET'), 105, finalY + 8, { align: 'center' });
-      doc.setFont('helvetica', 'italic');
-      doc.setFontSize(8);
-      doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 105, finalY + 13, { align: 'center' });
+      if (loai === 'DIEU_CHUYEN') {
+        doc.text(removeVietnameseTones('DAI DIEN KHOA GIAO'), 35, finalY + 8, { align: 'center' });
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 35, finalY + 13, { align: 'center' });
 
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.text(removeVietnameseTones('KHO CAP PHAT'), 175, finalY + 8, { align: 'center' });
-      doc.setFont('helvetica', 'italic');
-      doc.setFontSize(8);
-      doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 175, finalY + 13, { align: 'center' });
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text(removeVietnameseTones('DAI DIEN KHOA NHAN'), 105, finalY + 8, { align: 'center' });
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 105, finalY + 13, { align: 'center' });
 
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.text(removeVietnameseTones(tenNguoiYeuCau), 35, finalY + 36, { align: 'center' });
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text(removeVietnameseTones('PHONG TBYT DUYET'), 175, finalY + 8, { align: 'center' });
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 175, finalY + 13, { align: 'center' });
 
-      doc.save(`bieu_mau_yeu_cau_${r.maPhieu}.pdf`);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text(removeVietnameseTones(tenNguoiYeuCau), 35, finalY + 36, { align: 'center' });
+      } else if (loai === 'MUA_SAM') {
+        doc.text(removeVietnameseTones('NGUOI DE XUAT'), 30, finalY + 8, { align: 'center' });
+        doc.text(removeVietnameseTones('TRUONG KHOA'), 75, finalY + 8, { align: 'center' });
+        doc.text(removeVietnameseTones('PHONG TBYT'), 125, finalY + 8, { align: 'center' });
+        doc.text(removeVietnameseTones('BAN GIAM DOC'), 175, finalY + 8, { align: 'center' });
+
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 30, finalY + 13, { align: 'center' });
+        doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 75, finalY + 13, { align: 'center' });
+        doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 125, finalY + 13, { align: 'center' });
+        doc.text(removeVietnameseTones('(Phe duyet)'), 175, finalY + 13, { align: 'center' });
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text(removeVietnameseTones(tenNguoiYeuCau), 30, finalY + 36, { align: 'center' });
+      } else if (loai === 'BAO_HONG') {
+        doc.text(removeVietnameseTones('NGUOI BAO HONG'), 35, finalY + 8, { align: 'center' });
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 35, finalY + 13, { align: 'center' });
+
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text(removeVietnameseTones('TRUONG KHOA XAC NHAN'), 105, finalY + 8, { align: 'center' });
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 105, finalY + 13, { align: 'center' });
+
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text(removeVietnameseTones('BO PHAN KY THUAT - KHO'), 175, finalY + 8, { align: 'center' });
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.text(removeVietnameseTones('(Tiep nhan xu ly)'), 175, finalY + 13, { align: 'center' });
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text(removeVietnameseTones(tenNguoiYeuCau), 35, finalY + 36, { align: 'center' });
+      } else {
+        doc.text(removeVietnameseTones('NGUOI DE NGHI'), 35, finalY + 8, { align: 'center' });
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 35, finalY + 13, { align: 'center' });
+
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text(removeVietnameseTones('TRUONG KHOA DUYET'), 105, finalY + 8, { align: 'center' });
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 105, finalY + 13, { align: 'center' });
+
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text(removeVietnameseTones('KHO CAP PHAT'), 175, finalY + 8, { align: 'center' });
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 175, finalY + 13, { align: 'center' });
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text(removeVietnameseTones(tenNguoiYeuCau), 35, finalY + 36, { align: 'center' });
+      }
+
+      doc.save(`bieu_mau_${loai.toLowerCase()}_${r.maPhieu}.pdf`);
       toast({ title: 'Thành công', description: `Đã xuất PDF biểu mẫu phiếu ${r.maPhieu}` });
     } catch (err: any) {
       console.error(err);
@@ -789,9 +1124,23 @@ export default function RequestsPage() {
             )}
           </Button>
 
+          {/* Nút Tạo đề xuất mới dành cho Trợ lý khoa hoặc Khoa */}
+          {isKhoa && (
+            <Button
+              onClick={() => {
+                setNewProposalOpen(true);
+                loadDeptInstances();
+              }}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-md mr-2 flex items-center gap-1.5"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Tạo đề xuất mới</span>
+            </Button>
+          )}
+
           {isTroLy && (
             <Button onClick={() => setCartOpen(true)} className="gradient-primary text-primary-foreground shadow-md mr-2 relative">
-              <ShoppingCart className="w-4 h-4 mr-2" /> Giỏ hàng yêu cầu
+              <ShoppingCart className="w-4 h-4 mr-2" /> Giỏ hàng cấp phát
               {cart.length > 0 && (
                 <span className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full animate-in zoom-in">
                   {cart.length}
@@ -852,10 +1201,58 @@ export default function RequestsPage() {
         )}
 
         <TabsContent value="history" className="mt-0">
+          {/* Thanh Tab lọc danh mục Đề xuất */}
+          <div className="flex flex-wrap items-center gap-2 mb-4 p-1.5 bg-muted/40 rounded-xl border w-fit">
+            <Button
+              variant={tabProposal === 'ALL' ? 'default' : 'ghost'}
+              size="sm"
+              className={cn("h-8 text-xs rounded-lg font-medium", tabProposal === 'ALL' ? "bg-primary text-primary-foreground font-semibold shadow-xs" : "text-muted-foreground")}
+              onClick={() => setTabProposal('ALL')}
+            >
+              Tất cả ({requests.length})
+            </Button>
+            <Button
+              variant={tabProposal === 'CAP_PHAT' ? 'default' : 'ghost'}
+              size="sm"
+              className={cn("h-8 text-xs rounded-lg font-medium gap-1.5", tabProposal === 'CAP_PHAT' ? "bg-blue-600 text-white font-semibold shadow-xs" : "text-muted-foreground")}
+              onClick={() => setTabProposal('CAP_PHAT')}
+            >
+              <ShoppingCart className="w-3.5 h-3.5" />
+              Cấp phát kho ({requests.filter(r => (r.loaiDeXuat || 'CAP_PHAT') === 'CAP_PHAT').length})
+            </Button>
+            <Button
+              variant={tabProposal === 'DIEU_CHUYEN' ? 'default' : 'ghost'}
+              size="sm"
+              className={cn("h-8 text-xs rounded-lg font-medium gap-1.5", tabProposal === 'DIEU_CHUYEN' ? "bg-purple-600 text-white font-semibold shadow-xs" : "text-muted-foreground")}
+              onClick={() => setTabProposal('DIEU_CHUYEN')}
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+              Điều chuyển ({requests.filter(r => r.loaiDeXuat === 'DIEU_CHUYEN').length})
+            </Button>
+            <Button
+              variant={tabProposal === 'MUA_SAM' ? 'default' : 'ghost'}
+              size="sm"
+              className={cn("h-8 text-xs rounded-lg font-medium gap-1.5", tabProposal === 'MUA_SAM' ? "bg-amber-600 text-white font-semibold shadow-xs" : "text-muted-foreground")}
+              onClick={() => setTabProposal('MUA_SAM')}
+            >
+              <ShoppingBag className="w-3.5 h-3.5" />
+              Mua sắm mới ({requests.filter(r => r.loaiDeXuat === 'MUA_SAM').length})
+            </Button>
+            <Button
+              variant={tabProposal === 'BAO_HONG' ? 'default' : 'ghost'}
+              size="sm"
+              className={cn("h-8 text-xs rounded-lg font-medium gap-1.5", tabProposal === 'BAO_HONG' ? "bg-rose-600 text-white font-semibold shadow-xs" : "text-muted-foreground")}
+              onClick={() => setTabProposal('BAO_HONG')}
+            >
+              <Wrench className="w-3.5 h-3.5" />
+              Báo hỏng ({requests.filter(r => r.loaiDeXuat === 'BAO_HONG').length})
+            </Button>
+          </div>
+
           <div className="flex gap-3 mb-4 flex-wrap items-center">
             <div className="relative max-w-sm w-full">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input placeholder="Tìm mã phiếu..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" />
+              <Input placeholder="Tìm mã phiếu, thiết bị, lý do..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" />
             </div>
             {(isNvkho || isQlKho) && (
               <SearchableSelect
@@ -900,10 +1297,11 @@ export default function RequestsPage() {
                       />
                     </th>
                   )}
-                  <th className="text-left p-3 font-medium text-muted-foreground w-1/6">Mã YC</th>
-                  <th className="text-left p-3 font-medium text-muted-foreground">Khoa</th>
-                  <th className="text-left p-3 font-medium text-muted-foreground">Danh mục yêu cầu</th>
-                  <th className="text-center p-3 font-medium text-muted-foreground">Số lượng mục</th>
+                  <th className="text-left p-3 font-medium text-muted-foreground w-28">Mã đề xuất</th>
+                  <th className="text-left p-3 font-medium text-muted-foreground w-36">Phân loại</th>
+                  <th className="text-left p-3 font-medium text-muted-foreground">Khoa đề nghị</th>
+                  <th className="text-left p-3 font-medium text-muted-foreground">Nội dung đề xuất</th>
+                  <th className="text-center p-3 font-medium text-muted-foreground">Quy mô</th>
                   <th className="text-center p-3 font-medium text-muted-foreground">Trạng thái</th>
                   <th className="text-center p-3 font-medium text-muted-foreground">Ngày YC</th>
                   <th className="text-right p-3 font-medium text-muted-foreground">Hành động</th>
@@ -914,6 +1312,9 @@ export default function RequestsPage() {
                     const itemCount = r.items?.length || 1;
                     const mainItem = r.items?.[0] || { tenThietBi: r.tenThietBi || r.maThietBi };
                     const isSelected = selectedReqIds.includes(r.maPhieu);
+                    const loai = r.loaiDeXuat || 'CAP_PHAT';
+                    const typeMeta = PROPOSAL_TYPE_MAP[loai] || PROPOSAL_TYPE_MAP.CAP_PHAT;
+                    const IconType = typeMeta.icon;
 
                     return (
                       <tr key={r.maPhieu} className={cn("border-b hover:bg-primary/5 transition-colors cursor-pointer group", isSelected && "bg-indigo-50/50")} onClick={() => startProcessing(r.maPhieu)}>
@@ -929,14 +1330,62 @@ export default function RequestsPage() {
                           </td>
                         )}
                         <td className="p-3 font-mono text-xs font-bold group-hover:text-primary transition-colors">{r.maPhieu}</td>
-                        <td className="p-3">{khoa?.tenKhoa || r.maKhoa}</td>
                         <td className="p-3">
-                          <div className="font-medium">
-                            {itemCount > 1 ? `${mainItem.tenThietBi} và ${itemCount - 1} thiết bị khác...` : mainItem.tenThietBi}
-                          </div>
-                          <div className="text-[10px] text-muted-foreground truncate max-w-xs">{r.lyDo}</div>
+                          <span className={cn("px-2.5 py-1 rounded-md text-[11px] font-semibold border flex items-center gap-1 w-fit", typeMeta.badgeClass)}>
+                            <IconType className="w-3 h-3" />
+                            {typeMeta.label}
+                          </span>
                         </td>
-                        <td className="p-3 text-center font-bold text-lg">{itemCount}</td>
+                        <td className="p-3 font-medium text-xs">{khoa?.tenKhoa || r.maKhoa}</td>
+                        <td className="p-3">
+                          {loai === 'DIEU_CHUYEN' ? (
+                            <div>
+                              <div className="font-semibold text-foreground">{mainItem.tenThietBi}</div>
+                              <div className="text-[11px] font-mono text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200 w-fit mt-1 flex items-center gap-1">
+                                <span>Máy: <strong>{r.maCaThe || mainItem.maCaThe}</strong></span>
+                                <span>➔ Đến: <strong>{departments.find(d => d.maKhoa === r.maKhoaNhan)?.tenKhoa || r.maKhoaNhan}</strong></span>
+                              </div>
+                              <div className="text-[10px] text-muted-foreground truncate max-w-xs mt-0.5">{r.lyDo}</div>
+                            </div>
+                          ) : loai === 'MUA_SAM' ? (
+                            <div>
+                              <div className="font-semibold text-amber-900">{r.tenThietBiMoi || 'Thiết bị mua sắm mới'}</div>
+                              {r.quyCachKyThuat && <div className="text-[10px] text-muted-foreground truncate max-w-xs">{r.quyCachKyThuat}</div>}
+                              <div className="text-[11px] text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 w-fit mt-1 font-medium">
+                                Dự toán: {r.duToanKinhPhi ? r.duToanKinhPhi.toLocaleString('vi-VN') + ' đ' : 'Chưa có'}
+                              </div>
+                              <div className="text-[10px] text-muted-foreground truncate max-w-xs mt-0.5">{r.lyDo}</div>
+                            </div>
+                          ) : loai === 'BAO_HONG' ? (
+                            <div>
+                              <div className="font-semibold text-rose-900">{mainItem.tenThietBi}</div>
+                              <div className="text-[11px] text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200 w-fit mt-1 flex items-center gap-1.5 font-medium">
+                                <span>Máy: <strong>{r.maCaThe}</strong></span>
+                                <span>•</span>
+                                <span className={r.mucDoUuTien === 'KHAN_CAP' ? 'text-destructive font-bold' : ''}>
+                                  {r.mucDoUuTien === 'KHAN_CAP' ? '🚨 Khẩn cấp' : 'Ưu tiên bình thường'}
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-muted-foreground truncate max-w-xs mt-0.5 italic">"{r.lyDo}"</div>
+                            </div>
+                          ) : (
+                            <div>
+                              <div className="font-medium">
+                                {itemCount > 1 ? `${mainItem.tenThietBi} và ${itemCount - 1} thiết bị khác...` : mainItem.tenThietBi}
+                              </div>
+                              <div className="text-[10px] text-muted-foreground truncate max-w-xs">{r.lyDo}</div>
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-3 text-center">
+                          {loai === 'MUA_SAM' ? (
+                            <span className="font-bold text-sm text-amber-700">{r.soLuongYeuCau || 1} {r.items?.[0]?.donVi || 'Cái'}</span>
+                          ) : loai === 'DIEU_CHUYEN' || loai === 'BAO_HONG' ? (
+                            <span className="font-bold text-sm text-foreground">1 Máy</span>
+                          ) : (
+                            <span className="font-bold text-sm text-primary">{itemCount} TB</span>
+                          )}
+                        </td>
                         <td className="p-3 text-center">
                           <span className={cn(`px-3 py-1 rounded-full text-[10px] uppercase font-bold border`, STATUS_COLORS[r.trangThai as keyof typeof STATUS_COLORS] || 'bg-muted')}>
                             {r.trangThai === 'DA_HUY' ? 'Đã hủy' : (STATUS_MAP[r.trangThai as keyof typeof STATUS_MAP] || r.trangThai)}
@@ -956,7 +1405,7 @@ export default function RequestsPage() {
                               setPreviewReq(r);
                               setPreviewOpen(true);
                             }}
-                            title="Xem biểu mẫu đề nghị cấp phát"
+                            title="Xem biểu mẫu hành chính"
                           >
                             <FileText className="w-3.5 h-3.5" />
                             <span>Biểu mẫu</span>
@@ -971,7 +1420,7 @@ export default function RequestsPage() {
                               Xử lý duyệt
                             </Button>
                           )}
-                          {isNvkho && r.trangThai === 'DA_QL_KHO_DUYET' && (
+                          {isNvkho && r.trangThai === 'DA_QL_KHO_DUYET' && loai === 'CAP_PHAT' && (
                             <Button size="sm" className="gradient-primary text-white text-xs h-8" onClick={(e) => { e.stopPropagation(); startProcessing(r.maPhieu); }}>
                               Xử lý cấp phát
                             </Button>
@@ -1121,6 +1570,350 @@ export default function RequestsPage() {
         </DialogContent>
       </Dialog>
 
+      {/* MODAL TẠO ĐỀ XUẤT MỚI (Điều chuyển, Mua sắm mới, Báo hỏng) */}
+      <Dialog open={newProposalOpen} onOpenChange={setNewProposalOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
+          <DialogHeader className="p-5 border-b shadow-sm z-10 bg-card">
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <Plus className="w-5 h-5 text-indigo-600" />
+              Tạo Đề Xuất / Tờ Trình Thiết Bị Y Tế
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="p-5 flex-1 overflow-y-auto space-y-5 bg-muted/10">
+            {/* Tabs chọn loại đề xuất */}
+            <div className="grid grid-cols-3 gap-2 p-1.5 bg-muted/40 rounded-xl border">
+              <button
+                type="button"
+                onClick={() => setProposalType('DIEU_CHUYEN')}
+                className={cn(
+                  "flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-bold transition-all",
+                  proposalType === 'DIEU_CHUYEN' 
+                    ? "bg-purple-600 text-white shadow-sm" 
+                    : "text-muted-foreground hover:bg-muted"
+                )}
+              >
+                <ArrowRightLeft className="w-4 h-4" />
+                <span>1. Điều chuyển thiết bị</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setProposalType('MUA_SAM')}
+                className={cn(
+                  "flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-bold transition-all",
+                  proposalType === 'MUA_SAM' 
+                    ? "bg-amber-600 text-white shadow-sm" 
+                    : "text-muted-foreground hover:bg-muted"
+                )}
+              >
+                <ShoppingBag className="w-4 h-4" />
+                <span>2. Đề xuất mua sắm mới</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setProposalType('BAO_HONG')}
+                className={cn(
+                  "flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-bold transition-all",
+                  proposalType === 'BAO_HONG' 
+                    ? "bg-rose-600 text-white shadow-sm" 
+                    : "text-muted-foreground hover:bg-muted"
+                )}
+              >
+                <Wrench className="w-4 h-4" />
+                <span>3. Báo hỏng & Sửa chữa</span>
+              </button>
+            </div>
+
+            {/* Form nội dung cho từng loại đề xuất */}
+            {proposalType === 'DIEU_CHUYEN' && (
+              <div className="space-y-4 bg-card p-5 rounded-xl border shadow-sm">
+                <div className="border-b pb-3 mb-3">
+                  <h3 className="font-bold text-base text-purple-900 flex items-center gap-2">
+                    <ArrowRightLeft className="w-5 h-5 text-purple-600" />
+                    Đề xuất điều chuyển thiết bị sang khoa khác
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Hỗ trợ điều chuyển máy cá thể khoa đang mượn/sử dụng sang khoa phòng khác có nhu cầu điều trị.
+                  </p>
+                </div>
+
+                <div className="grid gap-4">
+                  <div>
+                    <Label className="mb-1 block text-sm font-semibold">
+                      Chọn thiết bị & Mã cá thể tại khoa ({user?.maKhoa || khoaYeuCau}) <span className="text-destructive">*</span>
+                    </Label>
+                    {loadingDeptInstances ? (
+                      <div className="text-xs text-muted-foreground italic py-2">Đang tải danh sách thiết bị khoa đang giữ...</div>
+                    ) : deptInstances.length === 0 ? (
+                      <div className="text-xs text-amber-700 bg-amber-50 p-3 rounded-lg border border-amber-200">
+                        Khoa hiện chưa có thiết bị nào đang mượn / sử dụng để điều chuyển.
+                      </div>
+                    ) : (
+                      <SearchableSelect
+                        options={deptInstances.map(i => ({
+                          value: i.maCaThe,
+                          label: `${i.maCaThe} - ${i.tenThietBi} ${i.serialNumber ? `(Serial: ${i.serialNumber})` : ''}`
+                        }))}
+                        value={transferInstance}
+                        onValueChange={setTransferInstance}
+                        placeholder="Tìm và Chọn mã máy cá thể cần chuyển..."
+                      />
+                    )}
+                  </div>
+
+                  <div>
+                    <Label className="mb-1 block text-sm font-semibold">
+                      Khoa tiếp nhận thiết bị <span className="text-destructive">*</span>
+                    </Label>
+                    <SearchableSelect
+                      options={departments.filter(d => d.maKhoa !== (user?.maKhoa || khoaYeuCau)).map(k => ({
+                        value: k.maKhoa,
+                        label: k.tenKhoa
+                      }))}
+                      value={transferDestDept}
+                      onValueChange={setTransferDestDept}
+                      placeholder="Chọn khoa tiếp nhận..."
+                    />
+                  </div>
+
+                  <div>
+                    <Label className="mb-1 block text-sm font-semibold">
+                      Lý do & Mục đích điều chuyển <span className="text-destructive">*</span>
+                    </Label>
+                    <Textarea
+                      value={transferReason}
+                      onChange={e => setTransferReason(e.target.value)}
+                      placeholder="Ví dụ: Chi viện phòng cấp cứu do quá tải bệnh nhân, hoặc hỗ trợ khoa Nhi hồi sức..."
+                      className="h-24 resize-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-3 border-t">
+                  <Button
+                    onClick={handleSubmitTransfer}
+                    className="bg-purple-600 hover:bg-purple-700 text-white gap-2 shadow-sm"
+                    disabled={!transferInstance || !transferDestDept || !transferReason.trim()}
+                  >
+                    <Send className="w-4 h-4" />
+                    Gửi đề xuất điều chuyển
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {proposalType === 'MUA_SAM' && (
+              <div className="space-y-4 bg-card p-5 rounded-xl border shadow-sm">
+                <div className="border-b pb-3 mb-3">
+                  <h3 className="font-bold text-base text-amber-900 flex items-center gap-2">
+                    <ShoppingBag className="w-5 h-5 text-amber-600" />
+                    Tờ trình đề xuất mua sắm trang thiết bị y tế mới
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Đề xuất Ban Giám Đốc và Phòng Vật tư - TBYT mua sắm bổ sung máy móc, trang thiết bị mới.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="sm:col-span-2">
+                    <Label className="mb-1 block text-sm font-semibold">
+                      Tên trang thiết bị y tế đề xuất mua sắm <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      placeholder="Ví dụ: Máy đo khí máu động mạch tự động, Máy sốc tim..."
+                      value={purchaseName}
+                      onChange={e => setPurchaseName(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <Label className="mb-1 block text-sm font-semibold">
+                      Tiêu chuẩn & Quy cách kỹ thuật dự kiến
+                    </Label>
+                    <Textarea
+                      placeholder="Xuất xứ, hãng sản xuất, thông số kỹ thuật chính, tiêu chuẩn CE/FDA..."
+                      value={purchaseSpecs}
+                      onChange={e => setPurchaseSpecs(e.target.value)}
+                      className="h-20 resize-none"
+                    />
+                  </div>
+
+                  <div>
+                    <Label className="mb-1 block text-sm font-semibold">
+                      Số lượng đề xuất <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={purchaseQty}
+                      onChange={e => setPurchaseQty(parseInt(e.target.value) || 1)}
+                    />
+                  </div>
+
+                  <div>
+                    <Label className="mb-1 block text-sm font-semibold">
+                      Đơn vị tính <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      placeholder="Ví dụ: Cái, Máy, Bộ, Hệ thống..."
+                      value={purchaseUnit}
+                      onChange={e => setPurchaseUnit(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <Label className="mb-1 block text-sm font-semibold">
+                      Dự toán kinh phí ước tính (VNĐ)
+                    </Label>
+                    <Input
+                      type="number"
+                      placeholder="Ví dụ: 350000000"
+                      value={purchaseBudget}
+                      onChange={e => setPurchaseBudget(e.target.value ? parseFloat(e.target.value) : '')}
+                    />
+                    {typeof purchaseBudget === 'number' && purchaseBudget > 0 && (
+                      <p className="text-xs text-amber-700 font-semibold mt-1">
+                        Bằng số: {purchaseBudget.toLocaleString('vi-VN')} VNĐ
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <Label className="mb-1 block text-sm font-semibold">
+                      Lý do & Thuyết minh sự cần thiết đầu tư <span className="text-destructive">*</span>
+                    </Label>
+                    <Textarea
+                      placeholder="Nêu rõ tình trạng thiếu hụt, số lượng ca bệnh cần phục vụ và hiệu quả chuyên môn..."
+                      value={purchaseReason}
+                      onChange={e => setPurchaseReason(e.target.value)}
+                      className="h-24 resize-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-3 border-t">
+                  <Button
+                    onClick={handleSubmitPurchase}
+                    className="bg-amber-600 hover:bg-amber-700 text-white gap-2 shadow-sm"
+                    disabled={!purchaseName.trim() || !purchaseReason.trim() || purchaseQty <= 0}
+                  >
+                    <Send className="w-4 h-4" />
+                    Gửi tờ trình mua sắm
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {proposalType === 'BAO_HONG' && (
+              <div className="space-y-4 bg-card p-5 rounded-xl border shadow-sm">
+                <div className="border-b pb-3 mb-3">
+                  <h3 className="font-bold text-base text-rose-900 flex items-center gap-2">
+                    <Wrench className="w-5 h-5 text-rose-600" />
+                    Biên bản báo hỏng và đề nghị bảo trì, sửa chữa
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Gửi thông báo sự cố hỏng hóc thiết bị để bộ phận kỹ thuật / QL Kho tiến hành kiểm tra, sửa chữa.
+                  </p>
+                </div>
+
+                <div className="grid gap-4">
+                  <div>
+                    <Label className="mb-1 block text-sm font-semibold">
+                      Chọn thiết bị & Mã cá thể gặp sự cố ({user?.maKhoa || khoaYeuCau}) <span className="text-destructive">*</span>
+                    </Label>
+                    {loadingDeptInstances ? (
+                      <div className="text-xs text-muted-foreground italic py-2">Đang tải danh sách thiết bị khoa đang giữ...</div>
+                    ) : deptInstances.length === 0 ? (
+                      <div className="text-xs text-amber-700 bg-amber-50 p-3 rounded-lg border border-amber-200">
+                        Khoa hiện chưa có thiết bị nào đang sử dụng để báo hỏng.
+                      </div>
+                    ) : (
+                      <SearchableSelect
+                        options={deptInstances.map(i => ({
+                          value: i.maCaThe,
+                          label: `${i.maCaThe} - ${i.tenThietBi} ${i.serialNumber ? `(Serial: ${i.serialNumber})` : ''}`
+                        }))}
+                        value={damageInstance}
+                        onValueChange={setDamageInstance}
+                        placeholder="Tìm và Chọn mã máy cá thể bị sự cố..."
+                      />
+                    )}
+                  </div>
+
+                  <div>
+                    <Label className="mb-1 block text-sm font-semibold">
+                      Mức độ ưu tiên xử lý <span className="text-destructive">*</span>
+                    </Label>
+                    <div className="grid grid-cols-2 gap-3 mt-1">
+                      <button
+                        type="button"
+                        onClick={() => setDamagePriority('BINH_THUONG')}
+                        className={cn(
+                          "p-3 rounded-xl border text-left flex items-center gap-2 transition-all",
+                          damagePriority === 'BINH_THUONG' ? "bg-amber-50 border-amber-400 text-amber-900 ring-1 ring-amber-400" : "bg-card text-muted-foreground"
+                        )}
+                      >
+                        <div className="w-3 h-3 rounded-full bg-amber-500" />
+                        <div>
+                          <div className="font-bold text-xs">Bình thường</div>
+                          <div className="text-[10px] text-muted-foreground">Sửa chữa theo kế hoạch</div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setDamagePriority('KHAN_CAP')}
+                        className={cn(
+                          "p-3 rounded-xl border text-left flex items-center gap-2 transition-all",
+                          damagePriority === 'KHAN_CAP' ? "bg-rose-50 border-rose-500 text-rose-900 ring-1 ring-rose-500" : "bg-card text-muted-foreground"
+                        )}
+                      >
+                        <div className="w-3 h-3 rounded-full bg-rose-600 animate-ping" />
+                        <div>
+                          <div className="font-bold text-xs text-destructive">Khẩn cấp / Cấp cứu</div>
+                          <div className="text-[10px] text-muted-foreground">Cần kỹ sư xử lý ngay lập tức</div>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <Label className="mb-1 block text-sm font-semibold">
+                      Mô tả hiện trạng hư hỏng & Triệu chứng lỗi <span className="text-destructive">*</span>
+                    </Label>
+                    <Textarea
+                      value={damageDescription}
+                      onChange={e => setDamageDescription(e.target.value)}
+                      placeholder="Mô tả chi tiết: Màn hình không lên nguồn, báo lỗi áp suất Sensor E-04, chập điện..."
+                      className="h-24 resize-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-3 border-t">
+                  <Button
+                    onClick={handleSubmitDamage}
+                    className="bg-rose-600 hover:bg-rose-700 text-white gap-2 shadow-sm"
+                    disabled={!damageInstance || !damageDescription.trim()}
+                  >
+                    <Send className="w-4 h-4" />
+                    Gửi biên bản báo hỏng
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="p-3 border-t bg-card">
+            <Button variant="ghost" onClick={() => setNewProposalOpen(false)}>
+              Đóng
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* MỚI: Dialog xử lý nhiều thiết bị */}
       <Dialog open={allocateOpen} onOpenChange={setAllocateOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col p-0">
@@ -1137,159 +1930,477 @@ export default function RequestsPage() {
                 </DialogHeader>
 
                 <div className="space-y-6">
-                  <div className="bg-muted/30 p-4 rounded-xl border space-y-2">
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider font-bold">Thông tin yêu cầu</p>
-                    <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
-                      <p><span className="text-muted-foreground">Người mượn:</span> <span className="font-semibold">{users.find(u => u.maNguoiDung === processingRequest.maNguoiYeuCau)?.hoTen}</span></p>
-                      <p><span className="text-muted-foreground">Khoa:</span> <span className="font-semibold">{departments.find(d => d.maKhoa === processingRequest.maKhoa)?.tenKhoa}</span></p>
-                      <p className="col-span-2"><span className="text-muted-foreground">Lý do:</span> <span className="italic">"{processingRequest.lyDo}"</span></p>
-                    </div>
-                  </div>
+                  {processingRequest.loaiDeXuat && processingRequest.loaiDeXuat !== 'CAP_PHAT' ? (
+                    /* GIAO DIỆN XỬ LÝ PHÊ DUYỆT ĐỀ XUẤT (ĐIỀU CHUYỂN, MUA SẮM, BÁO HỎNG) */
+                    <div className="space-y-5">
+                      {/* Tiêu đề & Loại đề xuất */}
+                      <div className="flex items-center justify-between p-4 rounded-xl border bg-muted/20">
+                        <div className="flex items-center gap-3">
+                          {processingRequest.loaiDeXuat === 'DIEU_CHUYEN' && (
+                            <div className="p-2.5 bg-purple-100 text-purple-700 rounded-xl">
+                              <ArrowRightLeft className="w-6 h-6" />
+                            </div>
+                          )}
+                          {processingRequest.loaiDeXuat === 'MUA_SAM' && (
+                            <div className="p-2.5 bg-amber-100 text-amber-700 rounded-xl">
+                              <ShoppingBag className="w-6 h-6" />
+                            </div>
+                          )}
+                          {processingRequest.loaiDeXuat === 'BAO_HONG' && (
+                            <div className="p-2.5 bg-rose-100 text-rose-700 rounded-xl">
+                              <Wrench className="w-6 h-6" />
+                            </div>
+                          )}
+                          <div>
+                            <div className="font-bold text-base text-foreground">
+                              {processingRequest.loaiDeXuat === 'DIEU_CHUYEN' && 'Đề xuất Điều chuyển Thiết bị'}
+                              {processingRequest.loaiDeXuat === 'MUA_SAM' && 'Tờ trình Đề xuất Mua sắm Mới'}
+                              {processingRequest.loaiDeXuat === 'BAO_HONG' && 'Biên bản Báo hỏng & Sửa chữa'}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              Mã phiếu: <span className="font-mono font-semibold text-foreground">{processingRequest.maPhieu}</span> • Tạo ngày: {new Date(processingRequest.ngayTao).toLocaleString('vi-VN')}
+                            </div>
+                          </div>
+                        </div>
 
-                  <div className="space-y-3">
-                    <Label className="text-sm font-bold flex items-center gap-2">
-                      <ClipboardList className="w-4 h-4" /> Duyệt từng thiết bị
-                    </Label>
-                    <div className="border rounded-xl overflow-hidden shadow-sm">
-                      <table className="w-full text-sm">
-                        <thead className="bg-muted/50 border-b">
-                          <tr>
-                            <th className="text-left p-3 font-medium text-muted-foreground">Thiết bị</th>
-                            <th className="text-center p-3 font-medium text-muted-foreground w-1/5">Số lượng</th>
-                            {isNvkho && <th className="text-center p-3 font-medium text-muted-foreground w-1/5">Tồn kho</th>}
-                            <th className="text-center p-3 font-medium text-muted-foreground w-1/5">Quyết định</th>
-                            <th className="text-left p-3 font-medium text-muted-foreground w-1/4">Ghi chú</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                          {processItems.map((item, idx) => {
-                            const details = processingRequest.items?.find((it: any) => it.maThietBi === item.maThietBi) ||
-                              { tenThietBi: item.maThietBi, soLuong: 0, tonKho: 0 };
-                            const itemStatus = details.trangThai || 'CHO_DUYET';
-                            const isEditable = (
-                              (isTruongKhoa && (processingRequest.trangThai === 'CHO_TRUONG_KHOA_DUYET' || processingRequest.trangThai === 'CHO_DUYET')) ||
-                              (isQlKho && processingRequest.trangThai === 'CHO_QL_KHO_DUYET' && itemStatus !== 'TU_CHOI') ||
-                              (isNvkho && processingRequest.trangThai === 'DA_QL_KHO_DUYET' && itemStatus !== 'TU_CHOI')
-                            );
-
-                            return (
-                              <tr key={idx} className={item.approved ? 'bg-green-50/20' : 'bg-red-50/20'}>
-                                <td className="p-3">
-                                  <div className="font-medium">{details.tenThietBi}</div>
-                                  <div className="text-[10px] text-muted-foreground font-mono">{item.maThietBi}</div>
-                                  {details.ngayTraDuKien && (
-                                    <div className="text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-md w-fit mt-1 border border-amber-200 font-medium whitespace-nowrap">
-                                      Dự kiến trả: {new Date(details.ngayTraDuKien).toLocaleDateString('vi-VN')}
-                                    </div>
-                                  )}
-                                  {!isEditable && (
-                                    <Badge className={cn("mt-1 text-[8px] h-4",
-                                      (itemStatus === 'DA_DUYET' || itemStatus === 'DA_CAP_PHAT') ? "bg-success text-white" : "bg-destructive text-white"
-                                    )}>{STATUS_MAP[itemStatus as keyof typeof STATUS_MAP] || itemStatus}</Badge>
-                                  )}
-                                </td>
-                                <td className="p-3 text-center border-r">
-                                  <div className="font-bold text-base">{details.soLuong} {details.donViTinh}</div>
-                                  {details.donViTinh !== details.donViCoSo && (
-                                    <div className="text-[10px] text-muted-foreground">
-                                      = {details.soLuongCoSo} {details.donViCoSo}
-                                    </div>
-                                  )}
-                                </td>
-                                {isNvkho && (
-                                  <td className="p-3 text-center">
-                                    <span className={cn(details.tonKho < (details.soLuong || 0) ? 'text-destructive font-bold' : 'text-success')}>
-                                      {details.tonKho}
-                                    </span>
-                                  </td>
-                                )}
-                                <td className="p-3">
-                                  {isEditable ? (
-                                    <div className="flex bg-muted/50 p-0.5 rounded-lg w-fit mx-auto shadow-inner">
-                                      <button
-                                        onClick={() => {
-                                          const newItems = [...processItems];
-                                          newItems[idx].approved = true;
-                                          setProcessItems(newItems);
-                                        }}
-                                        className={cn(
-                                          "px-3 py-1 text-[10px] font-bold rounded-md transition-all",
-                                          item.approved ? "bg-white text-green-600 shadow-sm" : "text-muted-foreground hover:text-foreground"
-                                        )}
-                                      >
-                                        Duyệt
-                                      </button>
-                                      <button
-                                        onClick={() => {
-                                          const newItems = [...processItems];
-                                          newItems[idx].approved = false;
-                                          setProcessItems(newItems);
-                                        }}
-                                        className={cn(
-                                          "px-3 py-1 text-[10px] font-bold rounded-md transition-all",
-                                          !item.approved ? "bg-white text-red-600 shadow-sm" : "text-muted-foreground hover:text-foreground"
-                                        )}
-                                      >
-                                        Từ chối
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <div className="text-center">
-                                      {item.approved ? <CheckCheck className="w-5 h-5 text-success mx-auto" /> : <X className="w-5 h-5 text-destructive mx-auto" />}
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="p-3">
-                                  {isEditable ? (
-                                    !item.approved && (
-                                      <Input
-                                        placeholder="Lý do..."
-                                        value={item.lyDo}
-                                        onChange={e => {
-                                          const newItems = [...processItems];
-                                          newItems[idx].lyDo = e.target.value;
-                                          setProcessItems(newItems);
-                                        }}
-                                        className="h-7 text-[10px] border-red-200"
-                                      />
-                                    )
-                                  ) : (
-                                    !item.approved && <span className="text-[10px] text-destructive italic">{details.lyDoTuChoi || item.lyDo}</span>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-sm font-bold">Ghi chú chung cho khoa</Label>
-                    <Textarea
-                      placeholder="VD: Mang theo thẻ nhân viên khi nhận thiết bị..."
-                      value={processGhiChu}
-                      onChange={e => setProcessGhiChu(e.target.value)}
-                      readOnly={!(isNvkho && processingRequest.trangThai === 'DA_QL_KHO_DUYET')}
-                      className="min-h-[60px] text-sm"
-                    />
-                  </div>
-                  
-                  {/* Hiển thị ảnh chứng minh nếu đã có */}
-                  {processingRequest.anhMinhChung && (
-                    <div className="space-y-2 mt-4 p-4 border rounded-xl bg-yellow-50/50">
-                      <Label className="text-sm font-bold text-yellow-800">Ảnh chứng minh bàn giao thiết bị</Label>
-                      <div className="mt-2">
-                        <img src={processingRequest.anhMinhChung} alt="Ảnh chứng minh" className="w-32 h-32 object-cover rounded-lg border shadow-sm" />
+                        <span className={cn("px-3 py-1 rounded-full text-xs font-bold border", STATUS_COLORS[processingRequest.trangThai as keyof typeof STATUS_COLORS] || 'bg-muted')}>
+                          {STATUS_MAP[processingRequest.trangThai as keyof typeof STATUS_MAP] || processingRequest.trangThai}
+                        </span>
                       </div>
+
+                      {/* CHI TIẾT 1: ĐIỀU CHUYỂN THIẾT BỊ */}
+                      {processingRequest.loaiDeXuat === 'DIEU_CHUYEN' && (
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-2 gap-4 p-4 rounded-xl bg-purple-50/50 border border-purple-100">
+                            <div>
+                              <p className="text-xs text-purple-700 font-semibold mb-1">Khoa điều chuyển (Giao):</p>
+                              <p className="font-bold text-sm text-foreground">
+                                {departments.find(d => d.maKhoa === processingRequest.maKhoa)?.tenKhoa || processingRequest.maKhoa}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-purple-700 font-semibold mb-1">Khoa tiếp nhận (Nhận):</p>
+                              <p className="font-bold text-sm text-purple-900 flex items-center gap-1.5">
+                                <ArrowRightLeft className="w-4 h-4 text-purple-600" />
+                                {departments.find(d => d.maKhoa === processingRequest.maKhoaNhan)?.tenKhoa || processingRequest.maKhoaNhan}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="p-4 rounded-xl border bg-card space-y-3">
+                            <p className="text-xs text-muted-foreground uppercase tracking-wider font-bold">Thông tin thiết bị điều chuyển</p>
+                            <div className="grid grid-cols-2 gap-4 text-sm">
+                              <div>
+                                <span className="text-muted-foreground text-xs block">Tên thiết bị:</span>
+                                <span className="font-bold text-foreground">
+                                  {processingRequest.items?.[0]?.tenThietBi || processingRequest.maThietBi}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground text-xs block">Mã máy cá thể bàn giao:</span>
+                                <span className="font-mono font-bold text-purple-700 bg-purple-50 px-2.5 py-1 rounded-md border border-purple-200 inline-block mt-0.5">
+                                  {processingRequest.maCaThe || processingRequest.items?.[0]?.maCaThe || 'Chưa xác định'}
+                                </span>
+                              </div>
+                              <div className="col-span-2">
+                                <span className="text-muted-foreground text-xs block">Lý do & Mục đích điều chuyển:</span>
+                                <p className="italic text-foreground mt-1 bg-muted/30 p-3 rounded-lg border">
+                                  "{processingRequest.lyDo}"
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* CHI TIẾT 2: MUA SẮM MỚI */}
+                      {processingRequest.loaiDeXuat === 'MUA_SAM' && (
+                        <div className="space-y-4">
+                          <div className="p-4 rounded-xl bg-amber-50/50 border border-amber-200 space-y-3">
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <p className="text-xs text-amber-800 font-semibold">Tên thiết bị y tế đề xuất mua sắm:</p>
+                                <p className="text-lg font-bold text-amber-950 mt-0.5">
+                                  {processingRequest.tenThietBiMoi || 'Thiết bị mua sắm mới'}
+                                </p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-xs text-amber-800 font-semibold">Dự toán kinh phí:</p>
+                                <p className="text-base font-extrabold text-amber-700 mt-0.5">
+                                  {processingRequest.duToanKinhPhi ? processingRequest.duToanKinhPhi.toLocaleString('vi-VN') + ' VNĐ' : 'Chưa xác định'}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4 text-xs pt-2 border-t border-amber-200/60">
+                              <div>
+                                <span className="text-amber-800 font-medium">Khoa lập tờ trình:</span>{' '}
+                                <span className="font-semibold text-foreground">{departments.find(d => d.maKhoa === processingRequest.maKhoa)?.tenKhoa}</span>
+                              </div>
+                              <div>
+                                <span className="text-amber-800 font-medium">Số lượng đề xuất:</span>{' '}
+                                <span className="font-bold text-foreground">{processingRequest.soLuong || 1} {processingRequest.donViTinh || 'Cái'}</span>
+                              </div>
+                              <div className="col-span-2">
+                                <span className="text-amber-800 font-medium block mb-1">Tiêu chuẩn & Quy cách kỹ thuật:</span>
+                                <div className="p-2.5 rounded-lg bg-white/80 border border-amber-200 text-foreground">
+                                  {processingRequest.quyCachKyThuat || 'Theo tiêu chuẩn chuyên môn Bộ Y Tế'}
+                                </div>
+                              </div>
+                              <div className="col-span-2">
+                                <span className="text-amber-800 font-medium block mb-1">Thuyết minh sự cần thiết đầu tư:</span>
+                                <div className="p-2.5 rounded-lg bg-white/80 border border-amber-200 italic text-foreground">
+                                  "{processingRequest.lyDo}"
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* CHI TIẾT 3: BÁO HỎNG & SỬA CHỮA */}
+                      {processingRequest.loaiDeXuat === 'BAO_HONG' && (
+                        <div className="space-y-4">
+                          <div className="p-4 rounded-xl bg-rose-50/50 border border-rose-200 space-y-3">
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <p className="text-xs text-rose-800 font-semibold">Thiết bị gặp sự cố kỹ thuật:</p>
+                                <p className="text-base font-bold text-rose-950 mt-0.5">
+                                  {processingRequest.items?.[0]?.tenThietBi || processingRequest.maThietBi}
+                                </p>
+                              </div>
+                              <div>
+                                <span className={cn(
+                                  "px-2.5 py-1 rounded-md text-xs font-bold border flex items-center gap-1",
+                                  processingRequest.mucDoUuTien === 'KHAN_CAP' 
+                                    ? "bg-rose-600 text-white border-rose-700 animate-pulse" 
+                                    : "bg-amber-100 text-amber-800 border-amber-300"
+                                )}>
+                                  {processingRequest.mucDoUuTien === 'KHAN_CAP' ? '🚨 KHẨN CẤP / CẤP CỨU' : 'Ưu tiên bình thường'}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4 text-xs pt-2 border-t border-rose-200/60">
+                              <div>
+                                <span className="text-rose-800 font-medium">Khoa báo sự cố:</span>{' '}
+                                <span className="font-semibold text-foreground">{departments.find(d => d.maKhoa === processingRequest.maKhoa)?.tenKhoa}</span>
+                              </div>
+                              <div>
+                                <span className="text-rose-800 font-medium">Mã máy cá thể:</span>{' '}
+                                <span className="font-mono font-bold text-rose-700 bg-white px-2 py-0.5 rounded border border-rose-300">{processingRequest.maCaThe}</span>
+                              </div>
+                              <div className="col-span-2">
+                                <span className="text-rose-800 font-medium block mb-1">Hiện trạng hư hỏng & Triệu chứng lỗi:</span>
+                                <div className="p-3 rounded-lg bg-white border border-rose-200 text-destructive font-medium italic">
+                                  "{processingRequest.lyDo}"
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* QUYẾT ĐỊNH DUYỆT (KHI CÓ QUYỀN DUYỆT) */}
+                      {((isTruongKhoa && (processingRequest.trangThai === 'CHO_TRUONG_KHOA_DUYET' || processingRequest.trangThai === 'CHO_DUYET')) ||
+                        (isQlKho && processingRequest.trangThai === 'CHO_QL_KHO_DUYET')) ? (
+                        <div className="p-4 rounded-xl border bg-card space-y-3 shadow-xs">
+                          <Label className="text-sm font-bold flex items-center gap-2">
+                            <ClipboardList className="w-4 h-4 text-primary" /> Quyết định phê duyệt đề xuất
+                          </Label>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const newItems = [...processItems];
+                                if (newItems.length > 0) newItems[0].approved = true;
+                                else newItems.push({ maThietBi: processingRequest.items?.[0]?.maThietBi || 'TB', approved: true, lyDo: '' });
+                                setProcessItems(newItems);
+                              }}
+                              className={cn(
+                                "p-3 rounded-xl border text-left flex items-center gap-3 transition-all",
+                                processItems[0]?.approved !== false
+                                  ? "bg-emerald-50 border-emerald-500 text-emerald-900 ring-2 ring-emerald-500/20 shadow-xs font-bold"
+                                  : "bg-muted/30 border-muted text-muted-foreground hover:bg-muted/50"
+                              )}
+                            >
+                              <div className={cn("w-4 h-4 rounded-full border flex items-center justify-center", processItems[0]?.approved !== false ? "border-emerald-600 bg-emerald-600 text-white" : "border-muted-foreground")}>
+                                {processItems[0]?.approved !== false && <Check className="w-3 h-3" />}
+                              </div>
+                              <div>
+                                <div className="text-xs">Đồng ý phê duyệt đề xuất</div>
+                                <div className="text-[10px] font-normal text-muted-foreground">
+                                  {isTruongKhoa ? 'Chuyển tiếp lên Quản lý Kho duyệt' : 'Xác nhận thực hiện & hoàn thành'}
+                                </div>
+                              </div>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const newItems = [...processItems];
+                                if (newItems.length > 0) newItems[0].approved = false;
+                                else newItems.push({ maThietBi: processingRequest.items?.[0]?.maThietBi || 'TB', approved: false, lyDo: '' });
+                                setProcessItems(newItems);
+                              }}
+                              className={cn(
+                                "p-3 rounded-xl border text-left flex items-center gap-3 transition-all",
+                                processItems[0]?.approved === false
+                                  ? "bg-rose-50 border-rose-500 text-rose-900 ring-2 ring-rose-500/20 shadow-xs font-bold"
+                                  : "bg-muted/30 border-muted text-muted-foreground hover:bg-muted/50"
+                              )}
+                            >
+                              <div className={cn("w-4 h-4 rounded-full border flex items-center justify-center", processItems[0]?.approved === false ? "border-rose-600 bg-rose-600 text-white" : "border-muted-foreground")}>
+                                {processItems[0]?.approved === false && <X className="w-3 h-3" />}
+                              </div>
+                              <div>
+                                <div className="text-xs">Từ chối đề xuất này</div>
+                                <div className="text-[10px] font-normal text-muted-foreground">Không chấp thuận đề xuất</div>
+                              </div>
+                            </button>
+                          </div>
+
+                          {processItems[0]?.approved === false && (
+                            <div className="space-y-1.5 pt-2 animate-in fade-in-50">
+                              <Label className="text-xs font-semibold text-destructive">Lý do từ chối đề xuất <span className="text-destructive">*</span></Label>
+                              <Input
+                                placeholder="Nhập lý do không phê duyệt đề xuất này..."
+                                value={processItems[0]?.lyDo || ''}
+                                onChange={e => {
+                                  const newItems = [...processItems];
+                                  if (newItems.length > 0) newItems[0].lyDo = e.target.value;
+                                  setProcessItems(newItems);
+                                }}
+                                className="border-rose-300 focus:border-rose-500 text-xs"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        /* THÔNG BÁO TRẠNG THÁI HIỆN TẠI (NẾU KHÔNG CÒN Ở BƯỚC DUYỆT) */
+                        <div className="p-4 rounded-xl border bg-muted/20 text-xs text-muted-foreground">
+                          {processingRequest.trangThai === 'TU_CHOI' ? (
+                            <div className="text-destructive font-medium">
+                              ❌ Đề xuất này đã bị từ chối. {processingRequest.lyDoTuChoi ? `Lý do: "${processingRequest.lyDoTuChoi}"` : ''}
+                            </div>
+                          ) : (
+                            <div className="text-emerald-700 font-medium">
+                              ✓ Đề xuất đang ở trạng thái: <strong>{STATUS_MAP[processingRequest.trangThai as keyof typeof STATUS_MAP] || processingRequest.trangThai}</strong>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
+                  ) : (
+                    /* GIAO DIỆN CẤP PHÁT KHO (CAP_PHAT) */
+                    <>
+                      <div className="bg-muted/30 p-4 rounded-xl border space-y-2">
+                        <p className="text-xs text-muted-foreground uppercase tracking-wider font-bold">Thông tin yêu cầu</p>
+                        <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
+                          <p><span className="text-muted-foreground">Người mượn:</span> <span className="font-semibold">{users.find(u => u.maNguoiDung === processingRequest.maNguoiYeuCau)?.hoTen}</span></p>
+                          <p><span className="text-muted-foreground">Khoa:</span> <span className="font-semibold">{departments.find(d => d.maKhoa === processingRequest.maKhoa)?.tenKhoa}</span></p>
+                          <p className="col-span-2"><span className="text-muted-foreground">Lý do:</span> <span className="italic">"{processingRequest.lyDo}"</span></p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <Label className="text-sm font-bold flex items-center gap-2">
+                          <ClipboardList className="w-4 h-4" /> Duyệt từng thiết bị
+                        </Label>
+                        <div className="border rounded-xl overflow-hidden shadow-sm">
+                          <table className="w-full text-sm">
+                            <thead className="bg-muted/50 border-b">
+                              <tr>
+                                <th className="text-left p-3 font-medium text-muted-foreground">Thiết bị</th>
+                                <th className="text-center p-3 font-medium text-muted-foreground w-1/5">Số lượng</th>
+                                {isNvkho && <th className="text-center p-3 font-medium text-muted-foreground w-1/5">Tồn kho</th>}
+                                <th className="text-center p-3 font-medium text-muted-foreground w-1/5">Quyết định</th>
+                                <th className="text-left p-3 font-medium text-muted-foreground w-1/4">Ghi chú</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y">
+                              {processItems.map((item, idx) => {
+                                const details = processingRequest.items?.find((it: any) => it.maThietBi === item.maThietBi) ||
+                                  { tenThietBi: item.maThietBi, soLuong: 0, tonKho: 0 };
+                                const itemStatus = details.trangThai || 'CHO_DUYET';
+                                const isEditable = (
+                                  (isTruongKhoa && (processingRequest.trangThai === 'CHO_TRUONG_KHOA_DUYET' || processingRequest.trangThai === 'CHO_DUYET')) ||
+                                  (isQlKho && processingRequest.trangThai === 'CHO_QL_KHO_DUYET' && itemStatus !== 'TU_CHOI') ||
+                                  (isNvkho && processingRequest.trangThai === 'DA_QL_KHO_DUYET' && itemStatus !== 'TU_CHOI')
+                                );
+
+                                return (
+                                  <tr key={idx} className={item.approved ? 'bg-green-50/20' : 'bg-red-50/20'}>
+                                    <td className="p-3">
+                                      <div className="font-medium">{details.tenThietBi}</div>
+                                      <div className="text-[10px] text-muted-foreground font-mono">{item.maThietBi}</div>
+                                      {details.ngayTraDuKien && (
+                                        <div className="text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-md w-fit mt-1 border border-amber-200 font-medium whitespace-nowrap">
+                                          Dự kiến trả: {new Date(details.ngayTraDuKien).toLocaleDateString('vi-VN')}
+                                        </div>
+                                      )}
+                                      {!isEditable && (
+                                        <Badge className={cn("mt-1 text-[8px] h-4",
+                                          (itemStatus === 'DA_DUYET' || itemStatus === 'DA_CAP_PHAT') ? "bg-success text-white" : "bg-destructive text-white"
+                                        )}>{STATUS_MAP[itemStatus as keyof typeof STATUS_MAP] || itemStatus}</Badge>
+                                      )}
+
+                                      {/* Gắn mã cá thể cho thiết bị tái sử dụng khi NV Kho cấp phát */}
+                                      {isNvkho && processingRequest.trangThai === 'DA_QL_KHO_DUYET' && item.approved && details.loaiThietBi === 'TAI_SU_DUNG' && (
+                                        <div className="mt-2 pt-2 border-t border-muted/80">
+                                          <div className="text-[10px] font-semibold text-muted-foreground mb-1 flex items-center justify-between">
+                                            <span>Gắn mã máy xuất kho:</span>
+                                            <span className="text-primary font-bold">
+                                              {(item.selectedInstances?.length || 0)}/{details.soLuongCoSo}
+                                            </span>
+                                          </div>
+                                          {warehouseAvailableInstances[item.maThietBi] && warehouseAvailableInstances[item.maThietBi].length > 0 ? (
+                                            <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto p-1 bg-muted/30 rounded border">
+                                              {warehouseAvailableInstances[item.maThietBi].map((inst: any) => {
+                                                const isSelected = item.selectedInstances ? item.selectedInstances.includes(inst.ma_ca_the) : false;
+                                                return (
+                                                  <button
+                                                    key={inst.ma_ca_the}
+                                                    type="button"
+                                                    onClick={() => {
+                                                      const current = item.selectedInstances || [];
+                                                      let next;
+                                                      if (current.includes(inst.ma_ca_the)) {
+                                                        next = current.filter((c: string) => c !== inst.ma_ca_the);
+                                                      } else {
+                                                        if (current.length >= details.soLuongCoSo) {
+                                                          toast({ title: 'Đã chọn đủ số lượng', description: `Bạn chỉ cần chọn ${details.soLuongCoSo} máy.` });
+                                                          return;
+                                                        }
+                                                        next = [...current, inst.ma_ca_the];
+                                                      }
+                                                      const newItems = [...processItems];
+                                                      newItems[idx].selectedInstances = next;
+                                                      setProcessItems(newItems);
+                                                    }}
+                                                    className={cn(
+                                                      "font-mono text-[9px] px-1.5 py-0.5 rounded border transition-colors cursor-pointer",
+                                                      isSelected
+                                                        ? "bg-primary text-primary-foreground border-primary font-bold shadow-sm"
+                                                        : "bg-background hover:bg-muted text-foreground border-border"
+                                                    )}
+                                                  >
+                                                    {inst.ma_ca_the} {isSelected && '✓'}
+                                                  </button>
+                                                );
+                                              })}
+                                            </div>
+                                          ) : (
+                                            <span className="text-[10px] text-muted-foreground italic">(Tự động cấp phát các máy có sẵn trong kho)</span>
+                                          )}
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td className="p-3 text-center border-r">
+                                      <div className="font-bold text-base">{details.soLuong} {details.donViTinh}</div>
+                                      {details.donViTinh !== details.donViCoSo && (
+                                        <div className="text-[10px] text-muted-foreground">
+                                          = {details.soLuongCoSo} {details.donViCoSo}
+                                        </div>
+                                      )}
+                                    </td>
+                                    {isNvkho && (
+                                      <td className="p-3 text-center">
+                                        <span className={cn(details.tonKho < (details.soLuong || 0) ? 'text-destructive font-bold' : 'text-success')}>
+                                          {details.tonKho}
+                                        </span>
+                                      </td>
+                                    )}
+                                    <td className="p-3">
+                                      {isEditable ? (
+                                        <div className="flex bg-muted/50 p-0.5 rounded-lg w-fit mx-auto shadow-inner">
+                                          <button
+                                            onClick={() => {
+                                              const newItems = [...processItems];
+                                              newItems[idx].approved = true;
+                                              setProcessItems(newItems);
+                                            }}
+                                            className={cn(
+                                              "px-3 py-1 text-[10px] font-bold rounded-md transition-all",
+                                              item.approved ? "bg-white text-green-600 shadow-sm" : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                          >
+                                            Duyệt
+                                          </button>
+                                          <button
+                                            onClick={() => {
+                                              const newItems = [...processItems];
+                                              newItems[idx].approved = false;
+                                              setProcessItems(newItems);
+                                            }}
+                                            className={cn(
+                                              "px-3 py-1 text-[10px] font-bold rounded-md transition-all",
+                                              !item.approved ? "bg-white text-red-600 shadow-sm" : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                          >
+                                            Từ chối
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <div className="text-center">
+                                          {item.approved ? <CheckCheck className="w-5 h-5 text-success mx-auto" /> : <X className="w-5 h-5 text-destructive mx-auto" />}
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td className="p-3">
+                                      {isEditable ? (
+                                        !item.approved && (
+                                          <Input
+                                            placeholder="Lý do..."
+                                            value={item.lyDo}
+                                            onChange={e => {
+                                              const newItems = [...processItems];
+                                              newItems[idx].lyDo = e.target.value;
+                                              setProcessItems(newItems);
+                                            }}
+                                            className="h-7 text-[10px] border-red-200"
+                                          />
+                                        )
+                                      ) : (
+                                        !item.approved && <span className="text-[10px] text-destructive italic">{details.lyDoTuChoi || item.lyDo}</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-sm font-bold">Ghi chú chung cho khoa</Label>
+                        <Textarea
+                          placeholder="VD: Mang theo thẻ nhân viên khi nhận thiết bị..."
+                          value={processGhiChu}
+                          onChange={e => setProcessGhiChu(e.target.value)}
+                          readOnly={!(isNvkho && processingRequest.trangThai === 'DA_QL_KHO_DUYET')}
+                          className="min-h-[60px] text-sm"
+                        />
+                      </div>
+                      
+                      {/* Hiển thị ảnh chứng minh nếu đã có */}
+                      {processingRequest.anhMinhChung && (
+                        <div className="space-y-2 mt-4 p-4 border rounded-xl bg-yellow-50/50">
+                          <Label className="text-sm font-bold text-yellow-800">Ảnh chứng minh bàn giao thiết bị</Label>
+                          <div className="mt-2">
+                            <img src={processingRequest.anhMinhChung} alt="Ảnh chứng minh" className="w-32 h-32 object-cover rounded-lg border shadow-sm" />
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
 
               {/* Ảnh chứng minh bắt buộc cho NV Kho khi cấp phát */}
-              {isNvkho && processingRequest.trangThai === 'DA_QL_KHO_DUYET' && (
+              {isNvkho && processingRequest.trangThai === 'DA_QL_KHO_DUYET' && processingRequest.loaiDeXuat === 'CAP_PHAT' && (
                 <div className="mx-6 mb-4 p-4 border-2 border-dashed rounded-xl space-y-3"
                   style={{ borderColor: proofImage ? 'hsl(160,60%,45%)' : 'hsl(0,84%,60%)' }}>
                   <Label className="text-sm font-bold flex items-center gap-2">
@@ -1337,23 +2448,41 @@ export default function RequestsPage() {
                     <FileText className="w-4 h-4 mr-1.5" /> Xem Biểu Mẫu
                   </Button>
                 </div>
-                {((isTruongKhoa && (processingRequest.trangThai === 'CHO_TRUONG_KHOA_DUYET' || processingRequest.trangThai === 'CHO_DUYET')) ||
-                  (isQlKho && processingRequest.trangThai === 'CHO_QL_KHO_DUYET') ||
-                  (isNvkho && processingRequest.trangThai === 'DA_QL_KHO_DUYET')) && (
-                  <Button
-                    onClick={submitProcessItems}
-                    disabled={loading
-                      || (isNvkho && processingRequest.trangThai === 'DA_QL_KHO_DUYET' && !proofImage)
-                      || (isNvkho && processItems.some(i => i.approved && (processingRequest.items?.find((it: any) => it.maThietBi === i.maThietBi)?.tonKho || 0) < (processingRequest.items?.find((it: any) => it.maThietBi === i.maThietBi)?.soLuong || 0)))}
-                    className="gradient-primary text-white font-bold min-w-[150px]"
-                    title={isNvkho && processingRequest.trangThai === 'DA_QL_KHO_DUYET' && !proofImage ? 'Bắt buộc tải ảnh chứng minh bàn giao trước khi hoàn thành cấp phát' : undefined}
-                  >
-                    {loading ? 'Đang xử lý...' : (
-                      isNvkho && processingRequest.trangThai === 'DA_QL_KHO_DUYET' && !proofImage
-                        ? 'Ảnh chứng minh chưa tải lên'
-                        : 'Xác nhận xử lý'
-                    )}
-                  </Button>
+                {processingRequest.loaiDeXuat && processingRequest.loaiDeXuat !== 'CAP_PHAT' ? (
+                  ((isTruongKhoa && (processingRequest.trangThai === 'CHO_TRUONG_KHOA_DUYET' || processingRequest.trangThai === 'CHO_DUYET')) ||
+                   (isQlKho && processingRequest.trangThai === 'CHO_QL_KHO_DUYET')) && (
+                    <Button
+                      onClick={submitProcessItems}
+                      disabled={loading || (processItems[0]?.approved === false && !processItems[0]?.lyDo?.trim())}
+                      className={cn(
+                        "font-bold min-w-[170px]",
+                        processItems[0]?.approved === false
+                          ? "bg-destructive hover:bg-destructive/90 text-white"
+                          : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                      )}
+                    >
+                      {loading ? 'Đang xử lý...' : (processItems[0]?.approved === false ? 'Xác nhận từ chối' : 'Xác nhận duyệt đề xuất')}
+                    </Button>
+                  )
+                ) : (
+                  ((isTruongKhoa && (processingRequest.trangThai === 'CHO_TRUONG_KHOA_DUYET' || processingRequest.trangThai === 'CHO_DUYET')) ||
+                    (isQlKho && processingRequest.trangThai === 'CHO_QL_KHO_DUYET') ||
+                    (isNvkho && processingRequest.trangThai === 'DA_QL_KHO_DUYET')) && (
+                    <Button
+                      onClick={submitProcessItems}
+                      disabled={loading
+                        || (isNvkho && processingRequest.trangThai === 'DA_QL_KHO_DUYET' && !proofImage)
+                        || (isNvkho && processItems.some(i => i.approved && (processingRequest.items?.find((it: any) => it.maThietBi === i.maThietBi)?.tonKho || 0) < (processingRequest.items?.find((it: any) => it.maThietBi === i.maThietBi)?.soLuong || 0)))}
+                      className="gradient-primary text-white font-bold min-w-[150px]"
+                      title={isNvkho && processingRequest.trangThai === 'DA_QL_KHO_DUYET' && !proofImage ? 'Bắt buộc tải ảnh chứng minh bàn giao trước khi hoàn thành cấp phát' : undefined}
+                    >
+                      {loading ? 'Đang xử lý...' : (
+                        isNvkho && processingRequest.trangThai === 'DA_QL_KHO_DUYET' && !proofImage
+                          ? 'Ảnh chứng minh chưa tải lên'
+                          : 'Xác nhận xử lý'
+                      )}
+                    </Button>
+                  )
                 )}
               </DialogFooter>
             </>
@@ -1591,13 +2720,16 @@ export default function RequestsPage() {
           <div className="flex-1 overflow-y-auto p-6 bg-muted/20">
             {previewReq && (() => {
               const khoa = departments.find(k => k.maKhoa === previewReq.maKhoa);
+              const khoaNhan = departments.find(k => k.maKhoa === previewReq.maKhoaNhan);
               const requester = users.find(u => u.maNguoiDung === previewReq.maNguoiYeuCau);
               const tenNguoiYeuCau = requester?.hoTen || previewReq.maNguoiYeuCau || 'Trợ lý khoa';
               const tenKhoa = khoa?.tenKhoa || previewReq.maKhoa;
+              const tenKhoaNhan = khoaNhan?.tenKhoa || previewReq.maKhoaNhan || 'Khoa tiếp nhận';
               const dateCreated = new Date(previewReq.ngayTao);
               const day = dateCreated.getDate();
               const month = dateCreated.getMonth() + 1;
               const year = dateCreated.getFullYear();
+              const loai = previewReq.loaiDeXuat || 'CAP_PHAT';
               const itemsList = previewReq.items && previewReq.items.length > 0 
                 ? previewReq.items 
                 : [{
@@ -1607,6 +2739,7 @@ export default function RequestsPage() {
                     donVi: 'Cái',
                     ghiChu: ''
                   }];
+              const mainItem = itemsList[0] || {};
 
               return (
                 <div 
@@ -1630,92 +2763,409 @@ export default function RequestsPage() {
                     </div>
                   </div>
 
-                  {/* Tên văn bản */}
-                  <div className="title-area text-center my-6">
-                    <h2 className="text-xl font-bold uppercase tracking-wide text-gray-900 mb-1">
-                      GIẤY ĐỀ NGHỊ CẤP PHÁT THIẾT BỊ Y TẾ
-                    </h2>
-                    <p className="italic text-xs text-gray-600">
-                      (Dùng cho Trợ lý / Khoa phòng điều trị đề xuất trang thiết bị y tế)
-                    </p>
-                  </div>
-
-                  {/* Kính gửi & Thông tin người đề xuất */}
-                  <div className="space-y-2 mb-5 text-[13px]">
-                    <div className="italic text-center font-medium mb-3">
-                      Kính gửi: Ban Giám Đốc, Phòng Quản lý Trang thiết bị y tế & Quản lý Kho
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div><span className="font-semibold">Đơn vị đề nghị:</span> {tenKhoa}</div>
-                      <div><span className="font-semibold">Mã khoa:</span> {previewReq.maKhoa}</div>
-                      <div><span className="font-semibold">Người đề nghị (Trợ lý):</span> {tenNguoiYeuCau}</div>
-                      <div><span className="font-semibold">Thời gian tạo:</span> {dateCreated.toLocaleString('vi-VN')}</div>
-                      <div><span className="font-semibold">Trạng thái phiếu:</span> <span className="font-bold text-primary">{STATUS_MAP[previewReq.trangThai as keyof typeof STATUS_MAP] || previewReq.trangThai}</span></div>
-                    </div>
-                    <div className="mt-2">
-                      <span className="font-semibold">Mục đích / Lý do đề nghị cấp phát:</span>
-                      <p className="italic text-gray-700 mt-0.5 bg-gray-50 p-2 rounded border border-gray-100">
-                        {previewReq.lyDo || 'Đề nghị cấp phát phục vụ công tác khám chữa bệnh chuyên môn tại khoa.'}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Bảng danh sách thiết bị yêu cầu */}
-                  <div className="mb-6">
-                    <div className="font-semibold text-[13px] mb-2 uppercase tracking-wide">
-                      I. Danh mục thiết bị y tế đề nghị cấp phát:
-                    </div>
-                    <table className="w-full border-collapse border border-gray-400 text-[12px]">
-                      <thead>
-                        <tr className="bg-gray-100 font-bold text-center">
-                          <th className="border border-gray-400 p-2 w-10">STT</th>
-                          <th className="border border-gray-400 p-2 w-28">Mã thiết bị</th>
-                          <th className="border border-gray-400 p-2 text-left">Tên thiết bị y tế</th>
-                          <th className="border border-gray-400 p-2 w-20">ĐVT</th>
-                          <th className="border border-gray-400 p-2 w-24">SL Đề nghị</th>
-                          <th className="border border-gray-400 p-2 text-left">Ghi chú</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {itemsList.map((item: any, idx: number) => (
-                          <tr key={idx} className="hover:bg-gray-50">
-                            <td className="border border-gray-400 p-2 text-center">{idx + 1}</td>
-                            <td className="border border-gray-400 p-2 text-center font-mono font-medium">{item.maThietBi}</td>
-                            <td className="border border-gray-400 p-2 font-medium">{item.tenThietBi || item.maThietBi}</td>
-                            <td className="border border-gray-400 p-2 text-center">{item.donVi || item.donViTinh || 'Cái'}</td>
-                            <td className="border border-gray-400 p-2 text-center font-bold text-base text-primary">
-                              {item.soLuongCoSo || item.soLuong || 1}
-                            </td>
-                            <td className="border border-gray-400 p-2 text-gray-600">{item.ghiChu || '---'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {/* Khối chữ ký 3 bên */}
-                  <div className="signatures mt-8 pt-4">
-                    <div className="text-right italic text-[11px] mb-4 text-gray-600">
-                      ........., Ngày ..... tháng ..... năm 20...
-                    </div>
-                    <div className="grid grid-cols-3 gap-4 text-center">
-                      <div className="sig-box">
-                        <div className="sig-title font-bold uppercase text-[12px]">NGƯỜI ĐỀ NGHỊ</div>
-                        <div className="sig-sub italic text-[11px] text-gray-500 mb-16">(Ký và ghi rõ họ tên)</div>
-                        <div className="sig-name font-bold text-[12px]">{tenNguoiYeuCau}</div>
+                  {/* BIỂU MẪU 1: ĐIỀU CHUYỂN THIẾT BỊ GIỮA CÁC KHOA PHÒNG */}
+                  {loai === 'DIEU_CHUYEN' ? (
+                    <>
+                      <div className="title-area text-center my-6">
+                        <h2 className="text-xl font-bold uppercase tracking-wide text-gray-900 mb-1">
+                          BIÊN BẢN ĐIỀU CHUYỂN TRANG THIẾT BỊ Y TẾ
+                        </h2>
+                        <p className="italic text-xs text-gray-600">
+                          (Căn cứ nhu cầu điều phối và sử dụng trang thiết bị y tế nội viện)
+                        </p>
                       </div>
-                      <div className="sig-box">
-                        <div className="sig-title font-bold uppercase text-[12px]">TRƯỞNG KHOA PHÊ DUYỆT</div>
-                        <div className="sig-sub italic text-[11px] text-gray-500 mb-16">(Ký và ghi rõ họ tên)</div>
-                        <div className="sig-name font-bold text-[12px]"></div>
+
+                      <div className="space-y-2 mb-5 text-[13px]">
+                        <div className="italic text-center font-medium mb-3">
+                          Kính gửi: Ban Giám Đốc, Phòng Quản lý Trang thiết bị y tế & Ban Chủ nhiệm Khoa tiếp nhận
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 bg-gray-50 p-3 rounded border border-gray-100">
+                          <div><span className="font-semibold">Đơn vị bàn giao:</span> {tenKhoa}</div>
+                          <div><span className="font-semibold">Đơn vị tiếp nhận:</span> {tenKhoaNhan}</div>
+                          <div><span className="font-semibold">Người lập biên bản:</span> {tenNguoiYeuCau}</div>
+                          <div><span className="font-semibold">Thời gian tạo:</span> {dateCreated.toLocaleString('vi-VN')}</div>
+                          <div className="col-span-2">
+                            <span className="font-semibold">Trạng thái:</span> <span className="font-bold text-primary">{STATUS_MAP[previewReq.trangThai as keyof typeof STATUS_MAP] || previewReq.trangThai}</span>
+                          </div>
+                        </div>
+                        <div className="mt-2">
+                          <span className="font-semibold">Lý do & Mục đích điều chuyển:</span>
+                          <p className="italic text-gray-700 mt-0.5 bg-gray-50 p-2 rounded border border-gray-100">
+                            {previewReq.lyDo || 'Điều chuyển phục vụ công tác cấp cứu, điều trị người bệnh.'}
+                          </p>
+                        </div>
                       </div>
-                      <div className="sig-box">
-                        <div className="sig-title font-bold uppercase text-[12px]">BỘ PHẬN KHO CẤP PHÁT</div>
-                        <div className="sig-sub italic text-[11px] text-gray-500 mb-16">(Ký và ghi rõ họ tên)</div>
-                        <div className="sig-name font-bold text-[12px]"></div>
+
+                      <div className="mb-6">
+                        <div className="font-semibold text-[13px] mb-2 uppercase tracking-wide">
+                          I. Danh mục trang thiết bị y tế bàn giao:
+                        </div>
+                        <table className="w-full border-collapse border border-gray-400 text-[12px]">
+                          <thead>
+                            <tr className="bg-gray-100 font-bold text-center">
+                              <th className="border border-gray-400 p-2 w-10">STT</th>
+                              <th className="border border-gray-400 p-2 text-left">Tên thiết bị y tế</th>
+                              <th className="border border-gray-400 p-2 w-28">Mã máy cá thể</th>
+                              <th className="border border-gray-400 p-2 w-20">ĐVT</th>
+                              <th className="border border-gray-400 p-2 w-16">SL</th>
+                              <th className="border border-gray-400 p-2 text-left">Tình trạng kỹ thuật khi bàn giao</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr className="hover:bg-gray-50">
+                              <td className="border border-gray-400 p-2 text-center">1</td>
+                              <td className="border border-gray-400 p-2 font-medium">
+                                <div>{mainItem.tenThietBi || previewReq.maThietBi}</div>
+                                <div className="text-[10px] text-gray-500 font-mono">Mã TB: {previewReq.maThietBi}</div>
+                              </td>
+                              <td className="border border-gray-400 p-2 text-center font-mono font-bold text-primary">
+                                {previewReq.maCaThe || mainItem.maCaThe || 'Chưa gán'}
+                              </td>
+                              <td className="border border-gray-400 p-2 text-center">Cái</td>
+                              <td className="border border-gray-400 p-2 text-center font-bold">1</td>
+                              <td className="border border-gray-400 p-2 text-gray-700">
+                                Hoạt động bình thường, đầy đủ phụ kiện kèm theo, linh kiện nguyên vẹn.
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
                       </div>
-                    </div>
-                  </div>
+
+                      <div className="signatures mt-8 pt-4">
+                        <div className="text-right italic text-[11px] mb-4 text-gray-600">
+                          ........., Ngày ..... tháng ..... năm 20...
+                        </div>
+                        <div className="grid grid-cols-3 gap-4 text-center">
+                          <div className="sig-box">
+                            <div className="sig-title font-bold uppercase text-[12px]">ĐẠI DIỆN KHOA GIAO</div>
+                            <div className="sig-sub italic text-[11px] text-gray-500 mb-16">(Ký và ghi rõ họ tên)</div>
+                            <div className="sig-name font-bold text-[12px]">{tenNguoiYeuCau}</div>
+                          </div>
+                          <div className="sig-box">
+                            <div className="sig-title font-bold uppercase text-[12px]">ĐẠI DIỆN KHOA NHẬN</div>
+                            <div className="sig-sub italic text-[11px] text-gray-500 mb-16">(Ký và ghi rõ họ tên)</div>
+                            <div className="sig-name font-bold text-[12px]"></div>
+                          </div>
+                          <div className="sig-box">
+                            <div className="sig-title font-bold uppercase text-[12px]">PHÒNG VẬT TƯ - TBYT DUYỆT</div>
+                            <div className="sig-sub italic text-[11px] text-gray-500 mb-16">(Ký và ghi rõ họ tên)</div>
+                            <div className="sig-name font-bold text-[12px]"></div>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  ) : loai === 'MUA_SAM' ? (
+                    /* BIỂU MẪU 2: TỜ TRÌNH ĐỀ XUẤT MUA SẮM MỚI */
+                    <>
+                      <div className="title-area text-center my-6">
+                        <h2 className="text-xl font-bold uppercase tracking-wide text-gray-900 mb-1">
+                          TỜ TRÌNH ĐỀ XUẤT MUA SẮM TRANG THIẾT BỊ Y TẾ MỚI
+                        </h2>
+                        <p className="italic text-xs text-gray-600">
+                          (V/v đề nghị đầu tư mua sắm bổ sung trang thiết bị y tế phục vụ khám chữa bệnh)
+                        </p>
+                      </div>
+
+                      <div className="space-y-2 mb-5 text-[13px]">
+                        <div className="italic text-center font-medium mb-3">
+                          Kính gửi: BAN GIÁM ĐỐC BỆNH VIỆN - PHÒNG VẬT TƯ TRANG THIẾT BỊ Y TẾ - PHÒNG TÀI CHÍNH
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 bg-gray-50 p-3 rounded border border-gray-100">
+                          <div><span className="font-semibold">Đơn vị lập tờ trình:</span> {tenKhoa}</div>
+                          <div><span className="font-semibold">Mã khoa:</span> {previewReq.maKhoa}</div>
+                          <div><span className="font-semibold">Cán bộ đề xuất:</span> {tenNguoiYeuCau}</div>
+                          <div><span className="font-semibold">Thời gian tạo:</span> {dateCreated.toLocaleString('vi-VN')}</div>
+                          <div className="col-span-2">
+                            <span className="font-semibold">Trạng thái tờ trình:</span> <span className="font-bold text-amber-700">{STATUS_MAP[previewReq.trangThai as keyof typeof STATUS_MAP] || previewReq.trangThai}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mb-6">
+                        <div className="font-semibold text-[13px] mb-2 uppercase tracking-wide">
+                          I. Danh mục trang thiết bị y tế đề xuất mua sắm:
+                        </div>
+                        <table className="w-full border-collapse border border-gray-400 text-[12px]">
+                          <thead>
+                            <tr className="bg-gray-100 font-bold text-center">
+                              <th className="border border-gray-400 p-2 w-10">STT</th>
+                              <th className="border border-gray-400 p-2 text-left">Tên trang thiết bị y tế</th>
+                              <th className="border border-gray-400 p-2 text-left">Tiêu chuẩn & Quy cách kỹ thuật</th>
+                              <th className="border border-gray-400 p-2 w-16">ĐVT</th>
+                              <th className="border border-gray-400 p-2 w-16">SL</th>
+                              <th className="border border-gray-400 p-2 text-right w-36">Dự toán kinh phí</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr className="hover:bg-gray-50">
+                              <td className="border border-gray-400 p-2 text-center">1</td>
+                              <td className="border border-gray-400 p-2 font-bold text-gray-900">
+                                {previewReq.tenThietBiMoi || 'Thiết bị mua sắm mới'}
+                              </td>
+                              <td className="border border-gray-400 p-2 text-gray-700">
+                                {previewReq.quyCachKyThuat || 'Theo tiêu chuẩn Bộ Y Tế và yêu cầu lâm sàng'}
+                              </td>
+                              <td className="border border-gray-400 p-2 text-center">{itemsList[0]?.donVi || 'Cái'}</td>
+                              <td className="border border-gray-400 p-2 text-center font-bold text-base text-primary">
+                                {previewReq.soLuongYeuCau || 1}
+                              </td>
+                              <td className="border border-gray-400 p-2 text-right font-bold text-amber-700">
+                                {previewReq.duToanKinhPhi ? previewReq.duToanKinhPhi.toLocaleString('vi-VN') + ' đ' : 'Chưa có'}
+                              </td>
+                            </tr>
+                            <tr className="bg-gray-50 font-bold">
+                              <td colSpan={5} className="border border-gray-400 p-2 text-right uppercase">Tổng kinh phí dự toán:</td>
+                              <td className="border border-gray-400 p-2 text-right text-amber-800 text-sm">
+                                {previewReq.duToanKinhPhi ? previewReq.duToanKinhPhi.toLocaleString('vi-VN') + ' VNĐ' : 'Chưa xác định'}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="mb-6">
+                        <div className="font-semibold text-[13px] mb-2 uppercase tracking-wide">
+                          II. Thuyết minh sự cần thiết và hiệu quả đầu tư:
+                        </div>
+                        <div className="bg-gray-50 p-3 rounded border border-gray-100 italic text-[13px] text-gray-800 leading-relaxed">
+                          {previewReq.lyDo || 'Căn cứ vào nhu cầu điều trị thực tế của bệnh nhân và định hướng nâng cao chất lượng khám chữa bệnh chuyên sâu tại khoa, kính đề nghị Ban Giám Đốc và các phòng chức năng phê duyệt chủ trương mua sắm.'}
+                        </div>
+                      </div>
+
+                      <div className="signatures mt-8 pt-4">
+                        <div className="text-right italic text-[11px] mb-4 text-gray-600">
+                          ........., Ngày ..... tháng ..... năm 20...
+                        </div>
+                        <div className="grid grid-cols-4 gap-2 text-center">
+                          <div className="sig-box">
+                            <div className="sig-title font-bold uppercase text-[11px]">NGƯỜI ĐỀ XUẤT</div>
+                            <div className="sig-sub italic text-[10px] text-gray-500 mb-16">(Ký và ghi rõ họ tên)</div>
+                            <div className="sig-name font-bold text-[11px]">{tenNguoiYeuCau}</div>
+                          </div>
+                          <div className="sig-box">
+                            <div className="sig-title font-bold uppercase text-[11px]">TRƯỞNG KHOA PHÒNG</div>
+                            <div className="sig-sub italic text-[10px] text-gray-500 mb-16">(Ký và ghi rõ họ tên)</div>
+                            <div className="sig-name font-bold text-[11px]"></div>
+                          </div>
+                          <div className="sig-box">
+                            <div className="sig-title font-bold uppercase text-[11px]">PHÒNG VẬT TƯ - TBYT</div>
+                            <div className="sig-sub italic text-[10px] text-gray-500 mb-16">(Ký và ghi rõ họ tên)</div>
+                            <div className="sig-name font-bold text-[11px]"></div>
+                          </div>
+                          <div className="sig-box">
+                            <div className="sig-title font-bold uppercase text-[11px]">BAN GIÁM ĐỐC</div>
+                            <div className="sig-sub italic text-[10px] text-gray-500 mb-16">(Phê duyệt)</div>
+                            <div className="sig-name font-bold text-[11px]"></div>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  ) : loai === 'BAO_HONG' ? (
+                    /* BIỂU MẪU 3: BIÊN BẢN BÁO HỎNG & ĐỀ NGHỊ BẢO TRÌ SỬA CHỮA */
+                    <>
+                      <div className="title-area text-center my-6">
+                        <h2 className="text-xl font-bold uppercase tracking-wide text-rose-900 mb-1">
+                          BIÊN BẢN GHI NHẬN HƯ HỎNG & ĐỀ NGHỊ BẢO TRÌ SỬA CHỮA
+                        </h2>
+                        <p className="italic text-xs text-gray-600">
+                          (Dùng cho các khoa điều trị khi phát hiện sự cố, hỏng hóc trang thiết bị y tế)
+                        </p>
+                      </div>
+
+                      <div className="space-y-2 mb-5 text-[13px]">
+                        <div className="italic text-center font-medium mb-3">
+                          Kính gửi: Ban Giám Đốc, Phòng Quản lý Trang thiết bị y tế & Bộ phận Kỹ thuật Bảo trì
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 bg-gray-50 p-3 rounded border border-gray-100">
+                          <div><span className="font-semibold">Khoa / Phòng báo hỏng:</span> {tenKhoa}</div>
+                          <div><span className="font-semibold">Mã khoa:</span> {previewReq.maKhoa}</div>
+                          <div><span className="font-semibold">Người phát hiện / Báo:</span> {tenNguoiYeuCau}</div>
+                          <div><span className="font-semibold">Thời gian phát hiện:</span> {dateCreated.toLocaleString('vi-VN')}</div>
+                          <div>
+                            <span className="font-semibold">Mức độ ưu tiên:</span>{' '}
+                            <span className={cn("font-bold px-2 py-0.5 rounded text-xs", previewReq.mucDoUuTien === 'KHAN_CAP' ? "bg-rose-100 text-destructive border border-rose-300" : "bg-amber-100 text-amber-800")}>
+                              {previewReq.mucDoUuTien === 'KHAN_CAP' ? '🚨 KHẨN CẤP / CẤP CỨU' : 'Bình thường'}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="font-semibold">Trạng thái xử lý:</span> <span className="font-bold text-primary">{STATUS_MAP[previewReq.trangThai as keyof typeof STATUS_MAP] || previewReq.trangThai}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mb-6">
+                        <div className="font-semibold text-[13px] mb-2 uppercase tracking-wide">
+                          I. Thông tin thiết bị y tế gặp sự cố:
+                        </div>
+                        <table className="w-full border-collapse border border-gray-400 text-[12px]">
+                          <thead>
+                            <tr className="bg-gray-100 font-bold text-center">
+                              <th className="border border-gray-400 p-2 w-10">STT</th>
+                              <th className="border border-gray-400 p-2 text-left">Tên thiết bị y tế</th>
+                              <th className="border border-gray-400 p-2 w-28">Mã máy cá thể</th>
+                              <th className="border border-gray-400 p-2 w-28">Mức độ ưu tiên</th>
+                              <th className="border border-gray-400 p-2 text-left">Hiện trạng hư hỏng & Triệu chứng lỗi</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr className="hover:bg-gray-50">
+                              <td className="border border-gray-400 p-2 text-center">1</td>
+                              <td className="border border-gray-400 p-2 font-medium">
+                                <div>{mainItem.tenThietBi || previewReq.maThietBi}</div>
+                                <div className="text-[10px] text-gray-500 font-mono">Mã TB: {previewReq.maThietBi}</div>
+                              </td>
+                              <td className="border border-gray-400 p-2 text-center font-mono font-bold text-rose-700">
+                                {previewReq.maCaThe || mainItem.maCaThe || 'Chưa gán'}
+                              </td>
+                              <td className="border border-gray-400 p-2 text-center">
+                                <span className={cn("px-2 py-0.5 rounded text-[11px] font-bold", previewReq.mucDoUuTien === 'KHAN_CAP' ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-800")}>
+                                  {previewReq.mucDoUuTien === 'KHAN_CAP' ? 'Khẩn cấp' : 'Bình thường'}
+                                </span>
+                              </td>
+                              <td className="border border-gray-400 p-2 text-gray-900 font-medium bg-rose-50/30">
+                                {previewReq.lyDo || 'Thiết bị gặp sự cố kỹ thuật trong quá trình vận hành.'}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="mb-6">
+                        <div className="font-semibold text-[13px] mb-2 uppercase tracking-wide">
+                          II. Đề xuất phương án xử lý:
+                        </div>
+                        <div className="bg-gray-50 p-3 rounded border border-gray-100 text-[13px] text-gray-800 leading-relaxed">
+                          Đề nghị Phòng Quản lý Trang thiết bị y tế & Quản lý Kho khẩn trương cử kỹ sư chuyên trách kiểm tra trực tiếp tại khoa, đánh giá tình trạng hư hỏng và tiến hành sửa chữa, bảo dưỡng hoặc thay thế linh kiện kịp thời để không làm gián đoạn công tác khám chữa bệnh.
+                        </div>
+                      </div>
+
+                      <div className="signatures mt-8 pt-4">
+                        <div className="text-right italic text-[11px] mb-4 text-gray-600">
+                          ........., Ngày ..... tháng ..... năm 20...
+                        </div>
+                        <div className="grid grid-cols-3 gap-4 text-center">
+                          <div className="sig-box">
+                            <div className="sig-title font-bold uppercase text-[12px]">NGƯỜI BÁO SỰ CỐ</div>
+                            <div className="sig-sub italic text-[11px] text-gray-500 mb-16">(Ký và ghi rõ họ tên)</div>
+                            <div className="sig-name font-bold text-[12px]">{tenNguoiYeuCau}</div>
+                          </div>
+                          <div className="sig-box">
+                            <div className="sig-title font-bold uppercase text-[12px]">TRƯỞNG KHOA XÁC NHẬN</div>
+                            <div className="sig-sub italic text-[11px] text-gray-500 mb-16">(Ký và ghi rõ họ tên)</div>
+                            <div className="sig-name font-bold text-[12px]"></div>
+                          </div>
+                          <div className="sig-box">
+                            <div className="sig-title font-bold uppercase text-[12px]">KỸ THUẬT - QL KHO TIẾP NHẬN</div>
+                            <div className="sig-sub italic text-[11px] text-gray-500 mb-16">(Ký và ghi rõ họ tên)</div>
+                            <div className="sig-name font-bold text-[12px]"></div>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    /* BIỂU MẪU 4: CẤP PHÁT THIẾT BỊ TỪ KHO (MẶC ĐỊNH) */
+                    <>
+                      <div className="title-area text-center my-6">
+                        <h2 className="text-xl font-bold uppercase tracking-wide text-gray-900 mb-1">
+                          GIẤY ĐỀ NGHỊ CẤP PHÁT THIẾT BỊ Y TẾ
+                        </h2>
+                        <p className="italic text-xs text-gray-600">
+                          (Dùng cho Trợ lý / Khoa phòng điều trị đề xuất trang thiết bị y tế)
+                        </p>
+                      </div>
+
+                      <div className="space-y-2 mb-5 text-[13px]">
+                        <div className="italic text-center font-medium mb-3">
+                          Kính gửi: Ban Giám Đốc, Phòng Quản lý Trang thiết bị y tế & Quản lý Kho
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div><span className="font-semibold">Đơn vị đề nghị:</span> {tenKhoa}</div>
+                          <div><span className="font-semibold">Mã khoa:</span> {previewReq.maKhoa}</div>
+                          <div><span className="font-semibold">Người đề nghị (Trợ lý):</span> {tenNguoiYeuCau}</div>
+                          <div><span className="font-semibold">Thời gian tạo:</span> {dateCreated.toLocaleString('vi-VN')}</div>
+                          <div><span className="font-semibold">Trạng thái phiếu:</span> <span className="font-bold text-primary">{STATUS_MAP[previewReq.trangThai as keyof typeof STATUS_MAP] || previewReq.trangThai}</span></div>
+                        </div>
+                        <div className="mt-2">
+                          <span className="font-semibold">Mục đích / Lý do đề nghị cấp phát:</span>
+                          <p className="italic text-gray-700 mt-0.5 bg-gray-50 p-2 rounded border border-gray-100">
+                            {previewReq.lyDo || 'Đề nghị cấp phát phục vụ công tác khám chữa bệnh chuyên môn tại khoa.'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mb-6">
+                        <div className="font-semibold text-[13px] mb-2 uppercase tracking-wide">
+                          I. Danh mục thiết bị y tế đề nghị cấp phát:
+                        </div>
+                        <table className="w-full border-collapse border border-gray-400 text-[12px]">
+                          <thead>
+                            <tr className="bg-gray-100 font-bold text-center">
+                              <th className="border border-gray-400 p-2 w-10">STT</th>
+                              <th className="border border-gray-400 p-2 w-28">Mã thiết bị</th>
+                              <th className="border border-gray-400 p-2 text-left">Tên thiết bị y tế</th>
+                              <th className="border border-gray-400 p-2 w-20">ĐVT</th>
+                              <th className="border border-gray-400 p-2 w-24">SL Đề nghị</th>
+                              <th className="border border-gray-400 p-2 text-left">Ghi chú</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {itemsList.map((item: any, idx: number) => {
+                              const assignedUnits = (item.danhSachCaThe && item.danhSachCaThe.length > 0)
+                                ? item.danhSachCaThe
+                                : previewAssignedInstances.filter((u: any) => u.maThietBi === item.maThietBi);
+                              return (
+                                <tr key={idx} className="hover:bg-gray-50">
+                                  <td className="border border-gray-400 p-2 text-center">{idx + 1}</td>
+                                  <td className="border border-gray-400 p-2 text-center font-mono font-medium">{item.maThietBi}</td>
+                                  <td className="border border-gray-400 p-2 font-medium">
+                                    <div>{item.tenThietBi || item.maThietBi}</div>
+                                    {assignedUnits.length > 0 && (
+                                      <div className="mt-1.5 text-[11px] font-mono text-primary font-bold bg-primary/5 p-1.5 rounded border border-primary/20 flex flex-wrap gap-1.5 items-center">
+                                        <span className="text-gray-600 font-sans font-normal text-[10px]">Mã máy cá thể đã cấp:</span>
+                                        {assignedUnits.map((u: any) => (
+                                          <span key={u.maCaThe} className="bg-white px-2 py-0.5 rounded border border-primary/30 shadow-2xs">
+                                            {u.maCaThe} {u.serialNumber ? `(Serial: ${u.serialNumber})` : ''}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td className="border border-gray-400 p-2 text-center">{item.donVi || item.donViTinh || 'Cái'}</td>
+                                  <td className="border border-gray-400 p-2 text-center font-bold text-base text-primary">
+                                    {item.soLuongCoSo || item.soLuong || 1}
+                                  </td>
+                                  <td className="border border-gray-400 p-2 text-gray-600">{item.ghiChu || '---'}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="signatures mt-8 pt-4">
+                        <div className="text-right italic text-[11px] mb-4 text-gray-600">
+                          ........., Ngày ..... tháng ..... năm 20...
+                        </div>
+                        <div className="grid grid-cols-3 gap-4 text-center">
+                          <div className="sig-box">
+                            <div className="sig-title font-bold uppercase text-[12px]">NGƯỜI ĐỀ NGHỊ</div>
+                            <div className="sig-sub italic text-[11px] text-gray-500 mb-16">(Ký và ghi rõ họ tên)</div>
+                            <div className="sig-name font-bold text-[12px]">{tenNguoiYeuCau}</div>
+                          </div>
+                          <div className="sig-box">
+                            <div className="sig-title font-bold uppercase text-[12px]">TRƯỞNG KHOA PHÊ DUYỆT</div>
+                            <div className="sig-sub italic text-[11px] text-gray-500 mb-16">(Ký và ghi rõ họ tên)</div>
+                            <div className="sig-name font-bold text-[12px]"></div>
+                          </div>
+                          <div className="sig-box">
+                            <div className="sig-title font-bold uppercase text-[12px]">BỘ PHẬN KHO CẤP PHÁT</div>
+                            <div className="sig-sub italic text-[11px] text-gray-500 mb-16">(Ký và ghi rõ họ tên)</div>
+                            <div className="sig-name font-bold text-[12px]"></div>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               );
             })()}

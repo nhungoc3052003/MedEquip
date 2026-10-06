@@ -68,19 +68,29 @@ export interface Khoa {
   trangThai: boolean;
 }
 
+export type LoaiDeXuat = 'CAP_PHAT' | 'DIEU_CHUYEN' | 'MUA_SAM' | 'BAO_HONG';
+
 export interface PhieuYeuCauCapPhat {
   maPhieu: string;
+  loaiDeXuat?: LoaiDeXuat;
+  maKhoaNhan?: string;
+  maCaThe?: string;
+  duToanKinhPhi?: number;
+  mucDoUuTien?: 'BINH_THUONG' | 'KHAN_CAP';
+  tenThietBiMoi?: string;
+  quyCachKyThuat?: string;
   maNguoiYeuCau: string;
   maThietBi: string;
   maKhoa: string;
   soLuongYeuCau: number;
   lyDo: string;
-  trangThai: 'CHO_DUYET' | 'DA_DUYET' | 'CHO_TRUONG_KHOA_DUYET' | 'CHO_QL_KHO_DUYET' | 'DA_QL_KHO_DUYET' | 'TU_CHOI' | 'DA_CAP_PHAT' | 'DA_HUY';
+  trangThai: 'CHO_DUYET' | 'DA_DUYET' | 'CHO_TRUONG_KHOA_DUYET' | 'CHO_QL_KHO_DUYET' | 'DA_QL_KHO_DUYET' | 'TU_CHOI' | 'DA_CAP_PHAT' | 'DA_HUY' | 'HOAN_THANH';
   ngayTao: string;
   ngayDuyet?: string;
   nguoiDuyet?: string;
   lyDoTuChoi?: string;
   anhMinhChung?: string;
+  items?: any[];
 }
 
 // v4: PhieuCapPhat với ngày hạn trả và trạng thái trả

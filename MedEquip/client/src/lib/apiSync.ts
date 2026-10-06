@@ -210,18 +210,38 @@ export async function apiDeleteDepartment(id: string) {
 }
 
 // ---- Requests ----
-export async function apiCreateRequest(data: { maNguoiYeuCau?: string; maKhoa: string; lyDo: string; items: { maThietBi: string; soLuong: number }[] }) {
+export async function apiCreateRequest(data: {
+  maNguoiYeuCau?: string;
+  maKhoa: string;
+  lyDo: string;
+  items?: { maThietBi: string; soLuong: number; donVi?: string; ngayTraDuKien?: string }[];
+  loaiDeXuat?: string;
+  maKhoaNhan?: string;
+  maCaThe?: string;
+  duToanKinhPhi?: number;
+  mucDoUuTien?: string;
+  tenThietBiMoi?: string;
+  quyCachKyThuat?: string;
+  soLuong?: number;
+  donViTinh?: string;
+}) {
   if (isMockMode()) {
-    if (!data.items || data.items.length === 0) return { success: false, message: 'Danh sách thiết bị trống' };
     const phieu: PhieuYeuCauCapPhat = {
-      maPhieu: generateId('YCCF'),
+      maPhieu: generateId(data.loaiDeXuat === 'DIEU_CHUYEN' ? 'DXDC' : (data.loaiDeXuat === 'MUA_SAM' ? 'DXMS' : (data.loaiDeXuat === 'BAO_HONG' ? 'DXBH' : 'YCCF'))),
       maNguoiYeuCau: data.maNguoiYeuCau || 'ND001',
       maKhoa: data.maKhoa,
       lyDo: data.lyDo,
-      maThietBi: data.items[0].maThietBi,
-      soLuongYeuCau: data.items[0].soLuong,
+      maThietBi: data.items?.[0]?.maThietBi || 'TB',
+      soLuongYeuCau: data.items?.[0]?.soLuong || data.soLuong || 1,
       trangThai: 'CHO_TRUONG_KHOA_DUYET',
-      ngayTao: new Date().toISOString()
+      ngayTao: new Date().toISOString(),
+      loaiDeXuat: (data.loaiDeXuat as any) || 'CAP_PHAT',
+      maKhoaNhan: data.maKhoaNhan,
+      maCaThe: data.maCaThe,
+      duToanKinhPhi: data.duToanKinhPhi,
+      mucDoUuTien: data.mucDoUuTien as any,
+      tenThietBiMoi: data.tenThietBiMoi,
+      quyCachKyThuat: data.quyCachKyThuat
     };
     const requests = store.getRequests();
     requests.push(phieu);
@@ -258,7 +278,7 @@ export async function apiScanRequest(maPhieu: string) {
   return fetchApi<any>(`/requests/${maPhieu}/scan`);
 }
 
-export async function apiProcessRequestItems(maPhieu: string, data: { items: { maThietBi: string; approved: boolean; lyDo?: string }[]; ghiChu?: string; proofImage?: string | null }) {
+export async function apiProcessRequestItems(maPhieu: string, data: { items: { maThietBi: string; approved: boolean; lyDo?: string; selectedInstances?: string[] }[]; ghiChu?: string; proofImage?: string | null }) {
   if (isMockMode()) {
     // Mock implementation for processing items
     const requests = store.getRequests();

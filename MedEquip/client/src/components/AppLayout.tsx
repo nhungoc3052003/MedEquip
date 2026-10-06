@@ -8,8 +8,9 @@ import { Badge } from '@/components/ui/badge';
 import {
   Hospital, LayoutDashboard, Package, Truck, Building2, FolderOpen,
   FileText, FileInput, FileOutput, ClipboardCheck, Bell, Users,
-  LogOut, ChevronLeft, Menu, AlertTriangle, UserCircle, BarChart3, RotateCcw, Wrench
+  LogOut, ChevronLeft, Menu, AlertTriangle, UserCircle, BarChart3, RotateCcw, Wrench, QrCode
 } from 'lucide-react';
+import { AssetLookupModal } from '@/components/AssetLookupModal';
 
 export type PageKey =
   | 'dashboard' | 'inventory' | 'imports' | 'exports' | 'suppliers' | 'departments'
@@ -45,6 +46,7 @@ export default function AppLayout({ currentPage, onNavigate, children }: AppLayo
   const { user, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [lookupOpen, setLookupOpen] = useState(false);
   const [, setNotifTrigger] = React.useState(0);
 
   React.useEffect(() => {
@@ -185,11 +187,30 @@ export default function AppLayout({ currentPage, onNavigate, children }: AppLayo
               {navItems.find(n => n.key === currentPage)?.label || 'Tổng quan'}
             </h1>
           </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setLookupOpen(true)}
+              className="border-primary/40 text-primary hover:bg-primary/10 flex items-center gap-1.5 shadow-sm text-xs font-semibold rounded-lg h-9"
+            >
+              <QrCode className="w-4 h-4" />
+              <span className="hidden sm:inline">Tra cứu thiết bị / Quét mã</span>
+              <span className="sm:hidden">Tra cứu</span>
+            </Button>
+          </div>
         </header>
         <div className="flex-1 overflow-y-auto p-4 md:p-6">
           {children}
         </div>
       </main>
+
+      <AssetLookupModal 
+        open={lookupOpen} 
+        onOpenChange={setLookupOpen} 
+        onNavigateToReturns={() => onNavigate('returns')}
+      />
     </div>
   );
 }

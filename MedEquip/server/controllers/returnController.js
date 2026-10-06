@@ -21,6 +21,7 @@ function mapReturn(row, details = []) {
       return {
         maPhieuCapPhat: meta.maPhieuCapPhat || row.ma_phieu_cap_phat,
         maThietBi: d.ma_thiet_bi,
+        maCaThe: d.ma_ca_the || meta.maCaThe || "",
         tenThietBi: d.ten_thiet_bi || d.ma_thiet_bi,
         soLuong: d.so_luong,
         donViTinh: d.don_vi_tinh,
@@ -96,10 +97,10 @@ export async function createReturn(req, res) {
         }
       }
 
-      const meta = { maPhieuCapPhat: item.maPhieuCapPhat, anhMinhChung: item.anhMinhChung || null };
+      const meta = { maPhieuCapPhat: item.maPhieuCapPhat, maCaThe: item.maCaThe || null, anhMinhChung: item.anhMinhChung || null };
       await conn.query(
-        "INSERT INTO chi_tiet_phieu_tra (ma_phieu_tra, ma_thiet_bi, so_luong, don_vi_tinh, so_luong_co_so, tinh_trang_khi_tra, anh_chung_minh, trang_thai) VALUES (?, ?, ?, ?, ?, ?, ?, 'CHO_DUYET')",
-        [parentId, item.maThietBi, item.soLuong, donVi, soLuongCoSo, item.tinhTrangKhiTra || "DA_BOC_SEAL", JSON.stringify(meta)]
+        "INSERT INTO chi_tiet_phieu_tra (ma_phieu_tra, ma_thiet_bi, ma_ca_the, so_luong, don_vi_tinh, so_luong_co_so, tinh_trang_khi_tra, anh_chung_minh, trang_thai) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CHO_DUYET')",
+        [parentId, item.maThietBi, item.maCaThe || null, item.soLuong, donVi, soLuongCoSo, item.tinhTrangKhiTra || "DA_BOC_SEAL", JSON.stringify(meta)]
       );
 
       await conn.query("UPDATE chi_tiet_cap_phat SET trang_thai_tra = 'YEU_CAU_TRA' WHERE ma_phieu_cap_phat = ? AND ma_thiet_bi = ?", [item.maPhieuCapPhat, item.maThietBi]);
@@ -269,6 +270,48 @@ export async function confirmReturn(req, res) {
 
         // Cập nhật phiếu cấp phát thành DA_TRA cho thiết bị này
         await conn.query("UPDATE chi_tiet_cap_phat SET trang_thai_tra = 'DA_TRA' WHERE ma_phieu_cap_phat = ? AND ma_thiet_bi = ?", [curMaPhieuCapPhat, d.ma_thiet_bi]);
+
+        // Cập nhật cá thể thiết bị (ca_the_thiet_bi)
+        if (d.ma_ca_the) {
+          const newTrangThai = (d.tinh_trang_khi_tra === "HONG") ? "HU_HONG" : "SAN_SANG";
+          await conn.query(`
+            UPDATE ca_the_thiet_bi 
+            SET vi_tri_hien_tai = 'KHO',
+                ma_khoa_hien_tai = NULL,
+                ma_phieu_cap_phat_hien_tai = NULL,
+                trang_thai = ?,
+                ngay_tra_du_kien = NULL,
+                ghi_chu = CONCAT(COALESCE(ghi_chu, ''), ' | Đã hoàn trả theo phiếu ', ?)
+            WHERE ma_ca_the = ?
+          `, [newTrangThai, phieu.ma_phieu_tra, d.ma_ca_the]);
+
+          await conn.query(`
+            UPDATE cap_phat_ca_the 
+            SET trang_thai = 'DA_TRA' 
+            WHERE ma_ca_the = ? AND ma_phieu_cap_phat = ?
+          `, [d.ma_ca_the, curMaPhieuCapPhat]);
+        } else if (loaiTB === 'TAI_SU_DUNG') {
+          // Fallback nếu phiếu chưa chỉ định ma_ca_the cụ thể
+          const [assignedInstances] = await conn.query(
+            "SELECT ma_ca_the FROM cap_phat_ca_the WHERE ma_phieu_cap_phat = ? AND ma_thiet_bi = ? AND trang_thai = 'DANG_SU_DUNG' LIMIT ?",
+            [curMaPhieuCapPhat, d.ma_thiet_bi, soLuongCoSo]
+          );
+          for (const inst of assignedInstances) {
+            await conn.query(`
+              UPDATE ca_the_thiet_bi 
+              SET vi_tri_hien_tai = 'KHO',
+                  ma_khoa_hien_tai = NULL,
+                  ma_phieu_cap_phat_hien_tai = NULL,
+                  trang_thai = ?,
+                  ngay_tra_du_kien = NULL
+              WHERE ma_ca_the = ?
+            `, [d.tinh_trang_khi_tra === "HONG" ? "HU_HONG" : "SAN_SANG", inst.ma_ca_the]);
+
+            await conn.query(`
+              UPDATE cap_phat_ca_the SET trang_thai = 'DA_TRA' WHERE ma_ca_the = ? AND ma_phieu_cap_phat = ?
+            `, [inst.ma_ca_the, curMaPhieuCapPhat]);
+          }
+        }
       } else {
         // Từ chối: khôi phục trạng thái cũ (CHUA_TRA)
         await conn.query("UPDATE chi_tiet_cap_phat SET trang_thai_tra = 'CHUA_TRA' WHERE ma_phieu_cap_phat = ? AND ma_thiet_bi = ?", [curMaPhieuCapPhat, d.ma_thiet_bi]);

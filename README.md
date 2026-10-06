@@ -6,12 +6,43 @@ Phiên bản v4 đi kèm với các cập nhật lớn về kiến trúc, phân 
 ## Cấu trúc dự án
 
 ```text
-MedEquip_4/
+MedEquip/
 ├── client/          # Frontend React + Vite + TypeScript + TailwindCSS
 ├── server/          # Backend Node.js + Express + MySQL
 └── database/        # Chứa schema SQL, DB mẫu và file migration
     ├── medequip_database.sql # Database hiện tại (Full Schema Mới)
     └── migration_v4.sql      # Script nâng cấp lên DB v4
+```
+
+## Kiến trúc Hệ thống & Kết nối CSDL (System Architecture)
+
+```mermaid
+flowchart TD
+    subgraph Client [Giao diện Người dùng - React Frontend]
+        App[Ứng dụng web App.tsx]
+        Auth[Phiên người dùng AuthContext.tsx]
+        APIClient[Khách hàng REST api.ts / apiSync.ts]
+        App --> Auth
+        App --> APIClient
+    end
+
+    subgraph Server [API và truy cập - Express Backend]
+        ExpressServer[API Express server.js]
+        Routes[Các tuyến API routes/]
+        Controllers[Bộ xử lý nghiệp vụ controllers/]
+        ExpressServer --> Routes
+        Routes --> Controllers
+    end
+
+    subgraph DatabaseLayer [Lưu trữ dữ liệu]
+        DBPool[Pool kết nối MySQL config/db.js]
+        MySQL[(Cơ sở dữ liệu MySQL medequip_db)]
+        DBPool <--> MySQL
+    end
+
+    APIClient -->|Gửi yêu cầu REST| ExpressServer
+    ExpressServer -->|Khởi tạo kết nối| DBPool
+    Controllers <-->|Truy vấn dữ liệu SQL pool.query| DBPool
 ```
 
 ## Cài đặt và Chạy

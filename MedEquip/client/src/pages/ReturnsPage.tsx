@@ -81,9 +81,14 @@ export default function ReturnsPage() {
   const [extDate, setExtDate] = useState('');
   const [extReason, setExtReason] = useState('');
 
-  // Due List state
+  // Due List & Early Return state
   const [dueDialogOpen, setDueDialogOpen] = useState(false);
   const [selectedDueItems, setSelectedDueItems] = useState<any[]>([]);
+  const [dueFilterTab, setDueFilterTab] = useState<'all' | 'due' | 'early'>('all');
+  const [dueSearch, setDueSearch] = useState('');
+  const [dialogSearch, setDialogSearch] = useState('');
+  const [deptInstances, setDeptInstances] = useState<any[]>([]);
+
   // Overdue alert state for QL_KHO
   const [overdueDialogOpen, setOverdueDialogOpen] = useState(false);
   const [overdueRemindSending, setOverdueRemindSending] = useState(false);
@@ -95,6 +100,7 @@ export default function ReturnsPage() {
     chiTiet: {
       maPhieuCapPhat: string;
       maThietBi: string;
+      maCaThe?: string;
       tenThietBi: string;
       soLuong: number;
       tinhTrangKhiTra: 'NGUYEN_SEAL' | 'DA_BOC_SEAL' | 'HONG';
@@ -165,6 +171,14 @@ export default function ReturnsPage() {
     return () => window.removeEventListener('store_notifications_changed', handleNotifChange);
   }, []);
 
+  useEffect(() => {
+    if (user?.maKhoa && (dialogOpen || dueDialogOpen)) {
+      fetchApi<any[]>(`/instances/department/${user.maKhoa}`).then(res => {
+        if (Array.isArray(res)) setDeptInstances(res);
+      }).catch(() => {});
+    }
+  }, [user?.maKhoa, dialogOpen, dueDialogOpen]);
+
   // Trạng thái thông báo
   const [notifOpen, setNotifOpen] = useState(false);
   const notifications = store.getNotifications().filter(n => n.nguoiNhan === user?.maNguoiDung && 
@@ -175,14 +189,9 @@ export default function ReturnsPage() {
   const canScanQR = user?.vaiTro === 'NV_KHO';
   const canOperateDue = user?.vaiTro === 'TRO_LY';
 
-  const dueAllocations = (allocations || []).filter(a => {
+  // Tất cả thiết bị đang mượn của khoa (hỗ trợ cả trước hạn, đúng hạn và quá hạn)
+  const allBorrowedAllocations = (allocations || []).filter(a => {
     if (!a) return false;
-    const dueDate = a.ngayDuKienTra ? new Date(a.ngayDuKienTra) : null;
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
-    const threeDaysLater = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
-    
-    // Đã gia hạn (DA_GIA_HAN) vẫn được coi là mượn (để cảnh báo khi đến hạn mới)
     const isBorrowed = a.trangThaiTra === 'CHUA_TRA' || a.trangThaiTra === 'DA_GIA_HAN';
     const isMine = ((user?.vaiTro === 'TRO_LY' || user?.vaiTro === 'TRUONG_KHOA') && a.maKhoa === user?.maKhoa) || user?.vaiTro === 'ADMIN';
 
@@ -199,7 +208,25 @@ export default function ReturnsPage() {
       Array.isArray(r.items) && r.items.some((i: any) => i.maThietBi === a.maThietBi)
     );
 
-    return isBorrowed && isMine && !isInPendingReturn && !hasPendingExtension && dueDate && dueDate <= threeDaysLater;
+    return isBorrowed && isMine && !isInPendingReturn && !hasPendingExtension;
+  });
+
+  // Thiết bị sắp đến hạn hoặc quá hạn (trong vòng 3 ngày)
+  const dueAllocations = allBorrowedAllocations.filter(a => {
+    const dueDate = a.ngayDuKienTra ? new Date(a.ngayDuKienTra) : null;
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const threeDaysLater = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+    return dueDate && dueDate <= threeDaysLater;
+  });
+
+  // Thiết bị còn hạn mượn (trả trước hạn)
+  const earlyAllocations = allBorrowedAllocations.filter(a => {
+    const dueDate = a.ngayDuKienTra ? new Date(a.ngayDuKienTra) : null;
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const threeDaysLater = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+    return !dueDate || dueDate > threeDaysLater;
   });
 
   // Tất cả thiết bị CHUA_TRA đã quá hạn (không phân biệt khoa) — dành cho QL_KHO
@@ -285,24 +312,14 @@ export default function ReturnsPage() {
       return; 
     }
 
-    const isValidMinhChung = form.chiTiet.every(ct => {
-      const alloc = (allocations || []).find(a => a && a.maPhieu === ct.maPhieuCapPhat && a.maThietBi === ct.maThietBi);
-      const isTuTieuHao = alloc?.loaiThietBi === 'VAT_TU_TIEU_HAO';
-      if (isTuTieuHao && ct.tinhTrangKhiTra === 'NGUYEN_SEAL' && !ct.anhMinhChung) {
-        return false;
-      }
-      return true;
-    });
-
-    if (!isValidMinhChung) {
-      toast({ title: 'Lỗi', description: 'Vui lòng tải lên ảnh minh chứng nguyên seal cho vật tư tiêu hao.', variant: 'destructive' });
-      return;
-    }
-
     let finalGhiChu = form.ghiChu;
     const minhChungs = form.chiTiet.filter(ct => ct.anhMinhChung).map(ct => ct.tenThietBi);
     if (minhChungs.length > 0) {
-      finalGhiChu += `\n[Đã đính kèm ảnh minh chứng nguyên seal cho: ${minhChungs.join(', ')}]`;
+      finalGhiChu += `\n[Đã đính kèm ảnh chụp cho: ${minhChungs.join(', ')}]`;
+    }
+    const itemNotes = form.chiTiet.filter((ct: any) => ct.ghiChuItem).map((ct: any) => `${ct.tenThietBi}: ${ct.ghiChuItem}`);
+    if (itemNotes.length > 0) {
+      finalGhiChu += `\n[Ghi chú tình trạng máy: ${itemNotes.join('; ')}]`;
     }
 
     try {
@@ -563,11 +580,15 @@ export default function ReturnsPage() {
       if (exists) {
         return { ...prev, chiTiet: prev.chiTiet.filter(ct => !(ct.maPhieuCapPhat === alloc.maPhieu && ct.maThietBi === alloc.maThietBi)) };
       } else {
+        const matchInst = deptInstances.find(inst => 
+          inst.maThietBi === alloc.maThietBi && (!inst.maPhieuCapPhat || inst.maPhieuCapPhat === alloc.maPhieu)
+        );
         return {
           ...prev,
           chiTiet: [...prev.chiTiet, {
             maPhieuCapPhat: alloc.maPhieu,
             maThietBi: alloc.maThietBi,
+            maCaThe: matchInst?.maCaThe || undefined,
             tenThietBi: alloc.tenThietBi || alloc.maThietBi,
             soLuong: alloc.soLuongCapPhat,
             tinhTrangKhiTra: alloc.loaiThietBi === 'VAT_TU_TIEU_HAO' ? 'NGUYEN_SEAL' : 'DA_BOC_SEAL',
@@ -993,15 +1014,19 @@ export default function ReturnsPage() {
           {(user?.vaiTro === 'TRO_LY' || user?.vaiTro === 'TRUONG_KHOA') && (
             <Button 
               variant="outline" 
-              onClick={() => setDueDialogOpen(true)}
-              className="relative border-destructive/30 text-destructive hover:bg-destructive/5"
+              onClick={() => { setSelectedDueItems([]); setDueDialogOpen(true); }}
+              className="relative border-primary/40 text-primary hover:bg-primary/5"
             >
-              <Info className="w-4 h-4 mr-2" /> Thiết bị đến hạn
-              {dueAllocations.length > 0 && (
-                <span className="absolute -top-2 -right-2 bg-destructive text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full shadow-sm animate-pulse">
+              <Info className="w-4 h-4 mr-2" /> Thiết bị đang mượn & Trả sớm
+              {dueAllocations.length > 0 ? (
+                <span className="absolute -top-2 -right-2 bg-destructive text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full shadow-sm animate-pulse" title={`${dueAllocations.length} thiết bị đến/quá hạn`}>
                   {dueAllocations.length}
                 </span>
-              )}
+              ) : (allBorrowedAllocations.length > 0 && (
+                <span className="absolute -top-2 -right-2 bg-primary text-white text-[10px] font-bold px-1.5 h-5 flex items-center justify-center rounded-full shadow-sm">
+                  {allBorrowedAllocations.length}
+                </span>
+              ))}
             </Button>
           )}
           {/* Nút cảnh báo quá hạn cho QL_KHO */}
@@ -1274,7 +1299,16 @@ export default function ReturnsPage() {
           <DialogHeader><DialogTitle>Lập phiếu Trả Thiết bị</DialogTitle></DialogHeader>
           <div className="space-y-6">
             <div>
-              <Label className="mb-2 block">Chọn thiết bị mượn (Gồm cả thiết bị được gia hạn) *</Label>
+              <Label className="mb-2 block">Chọn thiết bị mượn (Gồm cả thiết bị được gia hạn & trả trước hạn) *</Label>
+              <div className="relative mb-3">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                <Input
+                  placeholder="Lọc nhanh theo tên thiết bị, mã máy, mã phiếu..."
+                  value={dialogSearch}
+                  onChange={e => setDialogSearch(e.target.value)}
+                  className="h-8 text-xs pl-8 font-normal"
+                />
+              </div>
               <div className="border rounded-lg divide-y max-h-80 overflow-y-auto bg-muted/20">
                 {Object.keys(groupedAllocations).length === 0 ? (
                   <div className="p-4 text-center text-muted-foreground text-sm">Không có thiết bị nào đang mượn.</div>
@@ -1296,6 +1330,14 @@ export default function ReturnsPage() {
                       </div>
                       {items.map(alloc => {
                         if (!alloc) return null;
+                        const q = dialogSearch.trim().toLowerCase();
+                        const relatedInst = deptInstances.filter(i => i.maThietBi === alloc.maThietBi && (!i.maPhieuCapPhat || i.maPhieuCapPhat === alloc.maPhieu));
+                        if (q) {
+                          const codeMatch = relatedInst.some(i => i.maCaThe?.toLowerCase().includes(q) || i.serialNumber?.toLowerCase().includes(q));
+                          const nameMatch = alloc.tenThietBi?.toLowerCase().includes(q) || alloc.maPhieu?.toLowerCase().includes(q) || alloc.maThietBi?.toLowerCase().includes(q);
+                          if (!nameMatch && !codeMatch) return null;
+                        }
+
                         const key = `${alloc.maPhieu}-${alloc.maThietBi}`;
                         return (
                           <div key={key} className="flex items-center p-3 gap-3 hover:bg-white/50 transition-colors">
@@ -1306,7 +1348,16 @@ export default function ReturnsPage() {
                             />
                             <label htmlFor={`check-${key}`} className="flex-1 cursor-pointer">
                               <div className="text-sm font-medium">{alloc.tenThietBi}</div>
-                              <div className="flex justify-between items-center w-full">
+                              {relatedInst.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-0.5">
+                                  {relatedInst.map(inst => (
+                                    <span key={inst.maCaThe} className="font-mono text-[9px] bg-primary/10 text-primary px-1.5 py-0.5 rounded border border-primary/20">
+                                      {inst.maCaThe}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="flex justify-between items-center w-full mt-1">
                                 <div className="text-[10px] text-muted-foreground flex gap-3">
                                   <span className="font-bold text-primary">Mượn: {alloc.soLuongCapPhat} {alloc.donViTinh}</span>
                                   {alloc.soLuongCoSo !== alloc.soLuongCapPhat && (
@@ -1348,21 +1399,49 @@ export default function ReturnsPage() {
               <div className="space-y-4">
                 <Label>Chi tiết trạng thái & số lượng trả</Label>
                 <div className="space-y-3">
-                  {form.chiTiet.map((ct, idx) => (
-                    <div key={ct.maPhieuCapPhat} className="bg-card p-3 rounded-lg border shadow-sm flex flex-col sm:flex-row gap-4 items-start sm:items-center">
-                      <div className="flex-1 min-w-[150px]">
+                  {form.chiTiet.map((ct, idx) => {
+                    const alloc = (allocations || []).find(a => a && a.maPhieu === ct.maPhieuCapPhat && a.maThietBi === ct.maThietBi);
+                    const insts = deptInstances.filter(i => i.maThietBi === ct.maThietBi && (!i.maPhieuCapPhat || i.maPhieuCapPhat === ct.maPhieuCapPhat));
+                    return (
+                    <div key={ct.maPhieuCapPhat + ct.maThietBi} className="bg-card p-3 rounded-lg border shadow-sm flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+                      <div className="flex-1 min-w-[140px]">
                         <div className="text-sm font-semibold text-primary">{ct.tenThietBi}</div>
                         <div className="text-[10px] text-muted-foreground">
-                          Mã CP: {ct.maPhieuCapPhat} • Đơn vị trả: {allocations.find(a => a && a.maPhieu === ct.maPhieuCapPhat)?.donViTinh || '---'}
+                          Mã CP: {ct.maPhieuCapPhat} • Đơn vị: {alloc?.donViTinh || '---'}
                         </div>
                       </div>
+
+                      {/* Chọn mã máy cụ thể */}
+                      {alloc?.loaiThietBi === 'TAI_SU_DUNG' && insts.length > 0 && (
+                        <div className="w-full sm:w-36">
+                          <Label className="text-[10px] mb-1 block">Mã máy cụ thể</Label>
+                          <Select 
+                            value={ct.maCaThe || insts[0]?.maCaThe || ''} 
+                            onValueChange={(val: string) => {
+                              setForm(prev => ({
+                                ...prev,
+                                chiTiet: prev.chiTiet.map((it, i) => i === idx ? { ...it, maCaThe: val } : it)
+                              }));
+                            }}
+                          >
+                            <SelectTrigger className="h-8 text-xs font-mono"><SelectValue placeholder="Chọn mã máy" /></SelectTrigger>
+                            <SelectContent>
+                              {insts.map(inst => (
+                                <SelectItem key={inst.maCaThe} value={inst.maCaThe} className="font-mono text-xs">
+                                  {inst.maCaThe}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
                       
-                      <div className="w-full sm:w-24">
+                      <div className="w-full sm:w-20">
                         <Label className="text-[10px] mb-1 block">Số lượng</Label>
                         <Input 
                           type="number" 
                           min={1} 
-                          max={allocations.find(a => a && a.maPhieu === ct.maPhieuCapPhat && a.maThietBi === ct.maThietBi)?.soLuongCapPhat || 9999}
+                          max={alloc?.soLuongCapPhat || 9999}
                           value={ct.soLuong}
                           onChange={e => {
                             const val = parseInt(e.target.value) || 0;
@@ -1375,77 +1454,75 @@ export default function ReturnsPage() {
                         />
                       </div>
 
-                      <div className="flex-1 w-full">
-                        <Label className="text-[10px] mb-1 block">Tình trạng</Label>
-                        <Select 
-                          value={ct.tinhTrangKhiTra} 
-                          onValueChange={(val: any) => {
-                            setForm(prev => ({
-                              ...prev,
-                              chiTiet: prev.chiTiet.map((it, i) => i === idx ? { ...it, tinhTrangKhiTra: val } : it)
-                            }));
-                          }}
-                        >
-                          <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                             <SelectItem value="NGUYEN_SEAL">Nguyên seal (Còn nguyên bao bì)</SelectItem>
-                             {(() => {
-                               const alloc = (allocations || []).find(a => a && a.maPhieu === ct.maPhieuCapPhat && a.maThietBi === ct.maThietBi);
-                               return alloc?.loaiThietBi === 'TAI_SU_DUNG' && (
-                                 <SelectItem value="DA_BOC_SEAL">Đã bóc seal (Dùng tốt)</SelectItem>
-                               );
-                             })()}
-                             <SelectItem value="HONG">Hỏng / Cần sửa chữa</SelectItem>
-                           </SelectContent>
-                        </Select>
+                      <div className="w-full sm:w-36">
+                        <Label className="text-[10px] mb-1 block">Yêu cầu</Label>
+                        <div className="h-8 px-2.5 rounded-md bg-muted/60 text-xs font-medium text-foreground flex items-center gap-1.5 border">
+                          <RotateCcw className="w-3.5 h-3.5 text-primary shrink-0" />
+                          <span className="truncate">Hoàn trả về kho</span>
+                        </div>
                       </div>
 
-                      {allocations.find(a => a.maPhieu === ct.maPhieuCapPhat && a.maThietBi === ct.maThietBi)?.loaiThietBi === 'VAT_TU_TIEU_HAO' && ct.tinhTrangKhiTra === 'NGUYEN_SEAL' && (
-                        <div className="w-full sm:w-auto mt-2 sm:mt-0 flex flex-col gap-1">
-                          <Label className="text-[10px] text-orange-600 font-semibold flex items-center gap-1">
-                            <Camera className="w-3 h-3" /> Ảnh minh chứng *
-                          </Label>
-                          {ct.anhMinhChung ? (
-                            <div className="flex items-center justify-between gap-1 bg-success/10 text-success text-xs p-1 rounded border border-success/20 w-full sm:w-32">
-                              <span className="flex items-center gap-1 truncate" title={ct.anhMinhChung.length > 20 ? 'Ảnh đính kèm' : ct.anhMinhChung}><Check className="w-3 h-3 shrink-0" /> <span className="truncate">Đã tải ảnh lên</span></span>
-                              <Button 
-                                variant="ghost" size="icon" className="h-4 w-4 rounded-full hover:bg-success/20 hover:text-success shrink-0" 
-                                onClick={(e) => { e.preventDefault(); setForm(prev => ({ ...prev, chiTiet: prev.chiTiet.map((it, i) => i === idx ? { ...it, anhMinhChung: undefined } : it) })); }}
-                              >
-                                <X className="w-3 h-3" />
-                              </Button>
-                            </div>
-                          ) : (
-                            <Button
-                              variant="outline" size="sm" className="h-8 text-xs border-orange-200 text-orange-700 hover:bg-orange-50 w-full sm:w-32"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                const input = document.createElement('input');
-                                input.type = 'file'; input.accept = 'image/*';
-                                input.onchange = (ev) => {
-                                  const file = (ev.target as HTMLInputElement).files?.[0];
-                                  if (file) {
-                                    const reader = new FileReader();
-                                    reader.onloadend = () => {
-                                      setForm(prev => ({ ...prev, chiTiet: prev.chiTiet.map((it, i) => i === idx ? { ...it, anhMinhChung: reader.result as string } : it) }));
-                                    };
-                                    reader.readAsDataURL(file);
-                                  }
-                                };
-                                input.click();
-                              }}
+                      <div className="flex-1 w-full">
+                        <Label className="text-[10px] mb-1 block">Ghi chú tình trạng / Lý do trả</Label>
+                        <Input
+                          placeholder="VD: Đã dùng xong, hoặc ghi chú tình trạng máy..."
+                          value={(ct as any).ghiChuItem || ''}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setForm(prev => ({
+                              ...prev,
+                              chiTiet: prev.chiTiet.map((it, i) => i === idx ? { ...it, ghiChuItem: val, tinhTrangKhiTra: 'DA_BOC_SEAL' } : it)
+                            }));
+                          }}
+                          className="h-8 text-xs"
+                        />
+                      </div>
+
+                      <div className="w-full sm:w-auto mt-2 sm:mt-0 flex flex-col gap-1">
+                        <Label className="text-[10px] text-muted-foreground font-medium flex items-center gap-1">
+                          <Camera className="w-3 h-3" /> Ảnh đính kèm (nếu có)
+                        </Label>
+                        {ct.anhMinhChung ? (
+                          <div className="flex items-center justify-between gap-1 bg-success/10 text-success text-xs p-1 rounded border border-success/20 w-full sm:w-28">
+                            <span className="flex items-center gap-1 truncate text-[11px]"><Check className="w-3 h-3 shrink-0" /> Đã có ảnh</span>
+                            <Button 
+                              variant="ghost" size="icon" className="h-4 w-4 rounded-full hover:bg-success/20 hover:text-success shrink-0" 
+                              onClick={(e) => { e.preventDefault(); setForm(prev => ({ ...prev, chiTiet: prev.chiTiet.map((it, i) => i === idx ? { ...it, anhMinhChung: undefined } : it) })); }}
                             >
-                              <Upload className="w-3 h-3 mr-1" /> Tải lên
+                              <X className="w-3 h-3" />
                             </Button>
-                          )}
-                        </div>
-                      )}
+                          </div>
+                        ) : (
+                          <Button
+                            variant="outline" size="sm" className="h-8 text-xs text-muted-foreground hover:bg-muted w-full sm:w-28"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              const input = document.createElement('input');
+                              input.type = 'file'; input.accept = 'image/*';
+                              input.onchange = (ev) => {
+                                const file = (ev.target as HTMLInputElement).files?.[0];
+                                if (file) {
+                                  const reader = new FileReader();
+                                  reader.onloadend = () => {
+                                    setForm(prev => ({ ...prev, chiTiet: prev.chiTiet.map((it, i) => i === idx ? { ...it, anhMinhChung: reader.result as string } : it) }));
+                                  };
+                                  reader.readAsDataURL(file);
+                                }
+                              };
+                              input.click();
+                            }}
+                          >
+                            <Upload className="w-3 h-3 mr-1" /> Tải ảnh
+                          </Button>
+                        )}
+                      </div>
 
                       <Button variant="ghost" size="icon" onClick={() => setForm(prev => ({ ...prev, chiTiet: prev.chiTiet.filter((_, i) => i !== idx) }))}>
                         <X className="w-4 h-4 text-muted-foreground" />
                       </Button>
                     </div>
-                  ))}
+                  );
+                })}
                 </div>
               </div>
             )}
@@ -1853,125 +1930,239 @@ export default function ReturnsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* MODAL DANH SÁCH ĐẾN HẠN */}
+      {/* MODAL DANH SÁCH THIẾT BỊ ĐANG MƯỢN & TRẢ TRƯỚC HẠN */}
       <Dialog open={dueDialogOpen} onOpenChange={setDueDialogOpen}>
         <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col p-0">
           <DialogHeader className="p-6 border-b">
             <DialogTitle className="flex items-center gap-2">
-              <Info className="w-5 h-5 text-destructive" /> Thiết bị đến hạn / quá hạn trả
+              <RotateCcw className="w-5 h-5 text-primary" /> Danh sách Thiết bị đang mượn & Hoàn trả
               {user?.vaiTro === 'TRUONG_KHOA' && (
                 <span className="text-xs bg-muted text-muted-foreground font-normal px-2.5 py-0.5 rounded-full border">Chế độ xem</span>
               )}
             </DialogTitle>
-            {user?.vaiTro === 'TRUONG_KHOA' && (
-              <p className="text-xs text-muted-foreground mt-1">
-                Trưởng khoa xem theo dõi tình trạng hạn trả. Chỉ Trợ lý khoa mới có quyền thực hiện thao tác trả hoặc gia hạn.
-              </p>
-            )}
+            <p className="text-xs text-muted-foreground mt-1">
+              Khoa có thể hoàn trả bất kỳ thiết bị nào tại đây, bao gồm cả <strong>trả trước hạn</strong>, <strong>đến hạn</strong> hoặc <strong>quá hạn</strong>.
+            </p>
           </DialogHeader>
-          <div className="flex-1 overflow-y-auto p-6">
-            {dueAllocations.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">Không có thiết bị nào đến hạn trong 3 ngày tới.</div>
-            ) : (
-              <div className="border rounded-xl overflow-hidden shadow-sm">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50 border-b">
-                    <tr>
-                      {canOperateDue && (
-                        <th className="p-3 w-10 text-center">
-                          <Checkbox 
-                            checked={selectedDueItems.length === dueAllocations.length && dueAllocations.length > 0}
-                            onCheckedChange={(checked) => {
-                              if (checked) {
-                                setSelectedDueItems(dueAllocations);
-                              } else {
-                                setSelectedDueItems([]);
-                              }
-                            }}
-                          />
-                        </th>
-                      )}
-                      <th className="text-left p-3 font-medium">Thiết bị</th>
-                      <th className="text-left p-3 font-medium">Ngày mượn</th>
-                      <th className="text-left p-3 font-medium">Mã CP</th>
-                      <th className="text-center p-3 font-medium">Hạn trả</th>
-                      <th className="text-center p-3 font-medium">Trạng thái</th>
-                      {canOperateDue && (
-                        <th className="text-right p-3 font-medium">Hành động</th>
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {dueAllocations.map(alloc => {
-                      const { isOverdue, diffDays, text: dueStatusText, formattedDate } = getDueStatus(alloc.ngayDuKienTra);
-                      const isSelected = selectedDueItems.some(item => item.maPhieu === alloc.maPhieu && item.maThietBi === alloc.maThietBi);
-                      return (
-                        <tr key={alloc.maPhieu + alloc.maThietBi} className={cn(isOverdue ? 'bg-destructive/5' : '', isSelected ? 'bg-primary/5' : '')}>
-                          {canOperateDue && (
-                            <td className="p-3 text-center">
-                              <Checkbox 
-                                checked={isSelected}
-                                onCheckedChange={(checked) => {
-                                  if (checked) {
-                                    setSelectedDueItems(prev => [...prev, alloc]);
-                                  } else {
-                                    setSelectedDueItems(prev => prev.filter(item => !(item.maPhieu === alloc.maPhieu && item.maThietBi === alloc.maThietBi)));
-                                  }
-                                }}
-                              />
-                            </td>
-                          )}
-                          <td className="p-3">
-                            <div className="font-bold">{alloc.tenThietBi}</div>
-                            <div className="text-[10px] text-muted-foreground">{alloc.soLuongCapPhat} {alloc.donViTinh}</div>
-                          </td>
-                          <td className="p-3 text-xs text-muted-foreground">{alloc.ngayCapPhat ? new Date(alloc.ngayCapPhat).toLocaleDateString('vi-VN') : '---'}</td>
-                          <td className="p-3 font-mono text-xs">{alloc.maPhieu}</td>
-                          <td className="p-3 text-center">
-                            {alloc.ngayDuKienTra ? (
-                              <div className="flex flex-col items-center justify-center gap-1">
-                                <span className={cn("px-2 py-0.5 rounded text-[10px] font-bold inline-block", isOverdue ? "bg-destructive text-white" : "bg-warning/20 text-warning-foreground")}>
-                                  {formattedDate}
-                                </span>
-                                <span className={cn(
-                                  "text-[10px] whitespace-nowrap",
-                                  isOverdue ? "font-bold text-destructive" : diffDays === 0 ? "font-bold text-amber-600 dark:text-amber-400" : "font-medium text-muted-foreground"
-                                )}>
-                                  {dueStatusText}
-                                </span>
-                              </div>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">---</span>
-                            )}
-                          </td>
-                          <td className="p-3 text-center">
-                            <span className="text-[10px] font-medium">{TRANG_THAI_TRA_LABELS[alloc.trangThaiTra]}</span>
-                          </td>
-                          {canOperateDue && (
-                            <td className="p-3 text-right">
-                              <div className="flex justify-end gap-2">
-                                 <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => { setExtendingAllocs([alloc]); setExtDate(alloc.ngayDuKienTra!); setExtendOpen(true); }}>Gia hạn</Button>
-                                 <Button size="sm" className="gradient-primary h-8 text-xs text-white" onClick={() => { 
-                                    setDueDialogOpen(false); 
-                                    setForm({ ghiChu: '', chiTiet: [{
-                                      maPhieuCapPhat: alloc.maPhieu,
-                                      maThietBi: alloc.maThietBi,
-                                      tenThietBi: alloc.tenThietBi || alloc.maThietBi,
-                                      soLuong: alloc.soLuongCapPhat,
-                                      tinhTrangKhiTra: alloc.loaiThietBi === 'VAT_TU_TIEU_HAO' ? 'NGUYEN_SEAL' : 'DA_BOC_SEAL',
-                                    }] });
-                                    setDialogOpen(true);
-                                 }}>Trả ngay</Button>
-                              </div>
-                            </td>
-                          )}
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
+          <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            {/* Tabs & Search Filter */}
+            <div className="flex flex-col sm:flex-row justify-between gap-3 items-start sm:items-center">
+              <div className="flex gap-1 bg-muted p-1 rounded-lg">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={dueFilterTab === 'all' ? 'default' : 'ghost'}
+                  className="text-xs h-8"
+                  onClick={() => setDueFilterTab('all')}
+                >
+                  Tất cả ({allBorrowedAllocations.length})
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={dueFilterTab === 'due' ? 'default' : 'ghost'}
+                  className="text-xs h-8 text-destructive"
+                  onClick={() => setDueFilterTab('due')}
+                >
+                  Đến hạn / Quá hạn ({dueAllocations.length})
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={dueFilterTab === 'early' ? 'default' : 'ghost'}
+                  className="text-xs h-8 text-emerald-600 dark:text-emerald-400"
+                  onClick={() => setDueFilterTab('early')}
+                >
+                  Còn hạn (Trả trước hạn) ({earlyAllocations.length})
+                </Button>
               </div>
-            )}
+
+              <div className="relative w-full sm:w-64">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                <Input
+                  placeholder="Tìm thiết bị / mã phiếu..."
+                  value={dueSearch}
+                  onChange={e => setDueSearch(e.target.value)}
+                  className="h-8 text-xs pl-8 font-normal"
+                />
+              </div>
+            </div>
+
+            {(() => {
+              const displayedItems = allBorrowedAllocations.filter(alloc => {
+                const dueDate = alloc.ngayDuKienTra ? new Date(alloc.ngayDuKienTra) : null;
+                const now = new Date();
+                now.setHours(0, 0, 0, 0);
+                const threeDaysLater = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+                const isDue = dueDate && dueDate <= threeDaysLater;
+                if (dueFilterTab === 'due' && !isDue) return false;
+                if (dueFilterTab === 'early' && isDue) return false;
+                if (dueSearch) {
+                  const q = dueSearch.toLowerCase().trim();
+                  return (
+                    alloc.tenThietBi?.toLowerCase().includes(q) ||
+                    alloc.maPhieu?.toLowerCase().includes(q) ||
+                    alloc.maThietBi?.toLowerCase().includes(q)
+                  );
+                }
+                return true;
+              });
+
+              if (displayedItems.length === 0) {
+                return (
+                  <div className="text-center py-12 text-muted-foreground border rounded-xl bg-muted/10">
+                    Không có thiết bị nào phù hợp với bộ lọc hiện tại.
+                  </div>
+                );
+              }
+
+              return (
+                <div className="border rounded-xl overflow-hidden shadow-sm">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50 border-b">
+                      <tr>
+                        {canOperateDue && (
+                          <th className="p-3 w-10 text-center">
+                            <Checkbox 
+                              checked={selectedDueItems.length === displayedItems.length && displayedItems.length > 0}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  setSelectedDueItems(displayedItems);
+                                } else {
+                                  setSelectedDueItems([]);
+                                }
+                              }}
+                            />
+                          </th>
+                        )}
+                        <th className="text-left p-3 font-medium">Thiết bị & Mã máy</th>
+                        <th className="text-left p-3 font-medium">Ngày mượn</th>
+                        <th className="text-left p-3 font-medium">Mã CP</th>
+                        <th className="text-center p-3 font-medium">Tình trạng hạn</th>
+                        <th className="text-center p-3 font-medium">Trạng thái</th>
+                        {canOperateDue && (
+                          <th className="text-right p-3 font-medium">Hành động</th>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {displayedItems.map(alloc => {
+                        const { isOverdue, diffDays, text: dueStatusText, formattedDate } = getDueStatus(alloc.ngayDuKienTra);
+                        const isSelected = selectedDueItems.some(item => item.maPhieu === alloc.maPhieu && item.maThietBi === alloc.maThietBi);
+                        const isNearDue = alloc.ngayDuKienTra && !isOverdue && diffDays <= 3;
+                        const isEarly = !alloc.ngayDuKienTra || (!isOverdue && diffDays > 3);
+
+                        // Tìm các cá thể thiết bị tương ứng của khoa này
+                        const relatedInstances = deptInstances.filter(inst => 
+                          inst.maThietBi === alloc.maThietBi && 
+                          (!inst.maPhieuCapPhat || inst.maPhieuCapPhat === alloc.maPhieu)
+                        );
+
+                        return (
+                          <tr key={alloc.maPhieu + alloc.maThietBi} className={cn(
+                            isOverdue ? 'bg-destructive/5' : (isNearDue ? 'bg-amber-500/5' : ''),
+                            isSelected ? 'bg-primary/5' : ''
+                          )}>
+                            {canOperateDue && (
+                              <td className="p-3 text-center">
+                                <Checkbox 
+                                  checked={isSelected}
+                                  onCheckedChange={(checked) => {
+                                    if (checked) {
+                                      setSelectedDueItems(prev => [...prev, alloc]);
+                                    } else {
+                                      setSelectedDueItems(prev => prev.filter(item => !(item.maPhieu === alloc.maPhieu && item.maThietBi === alloc.maThietBi)));
+                                    }
+                                  }}
+                                />
+                              </td>
+                            )}
+                            <td className="p-3">
+                              <div className="font-bold text-foreground">{alloc.tenThietBi}</div>
+                              <div className="text-[10px] text-muted-foreground">
+                                Số lượng: <strong className="text-primary">{alloc.soLuongCapPhat} {alloc.donViTinh}</strong>
+                              </div>
+                              {/* Hiển thị mã cá thể thiết bị */}
+                              {relatedInstances.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {relatedInstances.map(inst => (
+                                    <span key={inst.maCaThe} className="font-mono text-[9px] bg-primary/10 text-primary px-1.5 py-0.5 rounded border border-primary/20">
+                                      {inst.maCaThe}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+                            <td className="p-3 text-xs text-muted-foreground">
+                              {alloc.ngayCapPhat ? new Date(alloc.ngayCapPhat).toLocaleDateString('vi-VN') : '---'}
+                            </td>
+                            <td className="p-3 font-mono text-xs">{alloc.maPhieu}</td>
+                            <td className="p-3 text-center">
+                              {alloc.ngayDuKienTra ? (
+                                <div className="flex flex-col items-center justify-center gap-1">
+                                  <span className={cn(
+                                    "px-2 py-0.5 rounded text-[10px] font-bold inline-block",
+                                    isOverdue ? "bg-destructive text-white" : (isNearDue ? "bg-amber-500 text-white" : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300")
+                                  )}>
+                                    {formattedDate}
+                                  </span>
+                                  <span className={cn(
+                                    "text-[10px] whitespace-nowrap",
+                                    isOverdue ? "font-bold text-destructive" : (isNearDue ? "font-bold text-amber-600 dark:text-amber-400" : "font-semibold text-emerald-600 dark:text-emerald-400")
+                                  )}>
+                                    {isEarly ? `Còn hạn (${dueStatusText})` : dueStatusText}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-[10px] bg-muted px-2 py-0.5 rounded text-muted-foreground">Không có hạn</span>
+                              )}
+                            </td>
+                            <td className="p-3 text-center">
+                              <span className="text-[10px] font-medium">{TRANG_THAI_TRA_LABELS[alloc.trangThaiTra]}</span>
+                            </td>
+                            {canOperateDue && (
+                              <td className="p-3 text-right">
+                                <div className="flex justify-end gap-2">
+                                  {alloc.ngayDuKienTra && (
+                                    <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => { setExtendingAllocs([alloc]); setExtDate(alloc.ngayDuKienTra!); setExtendOpen(true); }}>
+                                      Gia hạn
+                                    </Button>
+                                  )}
+                                  <Button 
+                                    size="sm" 
+                                    className={cn(
+                                      "h-8 text-xs text-white",
+                                      isEarly ? "bg-emerald-600 hover:bg-emerald-700" : "gradient-primary"
+                                    )} 
+                                    onClick={() => { 
+                                      setDueDialogOpen(false); 
+                                      setForm({ 
+                                        ghiChu: isEarly ? 'Trả thiết bị trước hạn' : '', 
+                                        chiTiet: [{
+                                          maPhieuCapPhat: alloc.maPhieu,
+                                          maThietBi: alloc.maThietBi,
+                                          tenThietBi: alloc.tenThietBi || alloc.maThietBi,
+                                          soLuong: alloc.soLuongCapPhat,
+                                          tinhTrangKhiTra: alloc.loaiThietBi === 'VAT_TU_TIEU_HAO' ? 'NGUYEN_SEAL' : 'DA_BOC_SEAL',
+                                          maCaThe: relatedInstances[0]?.maCaThe || undefined
+                                        }] 
+                                      });
+                                      setDialogOpen(true);
+                                    }}
+                                  >
+                                    {isEarly ? 'Trả trước hạn' : 'Trả ngay'}
+                                  </Button>
+                                </div>
+                              </td>
+                            )}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
           </div>
           <DialogFooter className="p-4 border-t bg-muted/20 flex justify-between items-center w-full">
             {canOperateDue ? (
@@ -1992,18 +2183,21 @@ export default function ReturnsPage() {
                   disabled={selectedDueItems.length === 0}
                   onClick={() => {
                     setDueDialogOpen(false);
-                    setForm({ ghiChu: '', chiTiet: selectedDueItems.map(alloc => ({
-                      maPhieuCapPhat: alloc.maPhieu,
-                      maThietBi: alloc.maThietBi,
-                      tenThietBi: alloc.tenThietBi || alloc.maThietBi,
-                      soLuong: alloc.soLuongCapPhat,
-                      tinhTrangKhiTra: alloc.loaiThietBi === 'VAT_TU_TIEU_HAO' ? 'NGUYEN_SEAL' : 'DA_BOC_SEAL',
-                    })) });
+                    setForm({ 
+                      ghiChu: '', 
+                      chiTiet: selectedDueItems.map(alloc => ({
+                        maPhieuCapPhat: alloc.maPhieu,
+                        maThietBi: alloc.maThietBi,
+                        tenThietBi: alloc.tenThietBi || alloc.maThietBi,
+                        soLuong: alloc.soLuongCapPhat,
+                        tinhTrangKhiTra: alloc.loaiThietBi === 'VAT_TU_TIEU_HAO' ? 'NGUYEN_SEAL' : 'DA_BOC_SEAL',
+                      })) 
+                    });
                     setDialogOpen(true);
                     setSelectedDueItems([]);
                   }}
                 >
-                  Trả ngay ({selectedDueItems.length})
+                  Hoàn trả các máy đã chọn ({selectedDueItems.length})
                 </Button>
               </div>
             ) : (
@@ -2012,7 +2206,7 @@ export default function ReturnsPage() {
                 Chỉ Trợ lý khoa mới có quyền thực hiện thao tác Trả hoặc Gia hạn thiết bị.
               </div>
             )}
-            <Button variant="ghost" onClick={() => setDueDialogOpen(false)}>Đóng</Button>
+            <Button variant="outline" onClick={() => setDueDialogOpen(false)}>Đóng</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

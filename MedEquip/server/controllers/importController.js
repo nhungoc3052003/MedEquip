@@ -355,6 +355,26 @@ export async function confirmImportFromExcel(req, res) {
           "UPDATE ton_kho SET so_luong_kho = so_luong_kho + ? WHERE ma_thiet_bi = ?",
           [soLuongCoSo, maThietBi]
         );
+
+        // Tự động sinh cá thể thiết bị cho thiết bị tái sử dụng
+        if (loai === 'TAI_SU_DUNG') {
+          const cleanPrefix = maThietBi.replace(/[^A-Za-z0-9]/g, '');
+          const [existCountRows] = await conn.query(
+            "SELECT COUNT(*) as cnt FROM ca_the_thiet_bi WHERE ma_thiet_bi = ?",
+            [maThietBi]
+          );
+          let startIdx = (existCountRows[0]?.cnt || 0) + 1;
+          for (let i = 0; i < soLuongCoSo; i++) {
+            const maCaThe = `${cleanPrefix}-${String(startIdx + i).padStart(3, '0')}`;
+            const serial = serialNumber ? `${serialNumber}-${i + 1}` : `SN-${cleanPrefix}-${2000 + startIdx + i}`;
+            await conn.query(
+              `INSERT IGNORE INTO ca_the_thiet_bi 
+               (ma_ca_the, ma_thiet_bi, serial_number, vi_tri_hien_tai, trang_thai, ghi_chu)
+               VALUES (?, ?, ?, 'KHO', 'SAN_SANG', ?)`,
+              [maCaThe, maThietBi, serial, `Nhập theo phiếu ${phieuId}`]
+            );
+          }
+        }
       }
 
       // 3. Xử lý định dạng ngày hạn sử dụng

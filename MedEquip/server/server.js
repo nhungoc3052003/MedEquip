@@ -18,11 +18,20 @@ import notificationRoutes from "./routes/notifications.js";
 import reportRoutes from "./routes/reports.js";
 import returnRoutes from "./routes/returns.js";
 import maintenanceRoutes from "./routes/maintenance.js";
+import instanceRoutes from "./routes/instances.js";
 import { checkAndSendDueNotifications } from "./services/dueNotificationService.js";
 
 dotenv.config();
 
 const app = express();
+
+// Kết nối cơ sở dữ liệu MySQL
+app.locals.db = pool;
+app.use((req, res, next) => {
+  req.db = pool;
+  next();
+});
+
 app.use(cors({
   origin: true,
   credentials: true,
@@ -67,6 +76,7 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/returns", returnRoutes);
 app.use("/api/maintenance", maintenanceRoutes);
+app.use("/api/instances", instanceRoutes);
 
 // 404 Handler
 app.use((req, res) => {
@@ -88,6 +98,11 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 MedEquip API v4 running on http://0.0.0.0:${PORT}`);
   console.log(`📋 API health check: http://localhost:${PORT}/api/test-db`);
+
+  // Kiểm tra kết nối cơ sở dữ liệu MySQL
+  pool.query("SELECT 1")
+    .then(() => console.log("✅ Cơ sở dữ liệu MySQL đã kết nối thành công!"))
+    .catch((err) => console.error("❌ Lỗi kết nối Cơ sở dữ liệu MySQL:", err.message));
 
   // Tự động kiểm tra và gửi thông báo hạn trả thiết bị sau 3s khi khởi động
   setTimeout(async () => {
