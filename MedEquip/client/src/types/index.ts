@@ -84,13 +84,41 @@ export interface PhieuYeuCauCapPhat {
   maKhoa: string;
   soLuongYeuCau: number;
   lyDo: string;
-  trangThai: 'CHO_DUYET' | 'DA_DUYET' | 'CHO_TRUONG_KHOA_DUYET' | 'CHO_QL_KHO_DUYET' | 'DA_QL_KHO_DUYET' | 'TU_CHOI' | 'DA_CAP_PHAT' | 'DA_HUY' | 'HOAN_THANH';
+  trangThai: 'CHO_DUYET' | 'DA_DUYET' | 'CHO_TRUONG_KHOA_DUYET' | 'CHO_QL_KHO_DUYET' | 'DA_QL_KHO_DUYET' | 'CHO_KHOA_NHAN_TEST' | 'TU_CHOI' | 'DA_CAP_PHAT' | 'DA_HUY' | 'HOAN_THANH';
   ngayTao: string;
   ngayDuyet?: string;
   nguoiDuyet?: string;
   lyDoTuChoi?: string;
   anhMinhChung?: string;
   items?: any[];
+  checklistKyThuat?: {
+    nguonPin: boolean;
+    manHinhPhim: boolean;
+    camBienDayDo: boolean;
+    khuKhuan: boolean;
+    ngoaiQuan: boolean;
+    ghiChu?: string;
+  };
+  maNguoiNhanTest?: string;
+  ngayTiepNhan?: string;
+  maNhuCau?: string;
+}
+
+export interface NhuCauThietBi {
+  maNhuCau: string;
+  maKhoaYeuCau: string;
+  maNguoiDang: string;
+  maThietBi?: string;
+  tenThietBi: string;
+  soLuongCan: number;
+  soLuongDaDapUng: number;
+  mucDoUuTien: 'BINH_THUONG' | 'KHAN_CAP';
+  lyDo?: string;
+  trangThai: 'DANG_TIM_KIEM' | 'HOAN_THANH' | 'DA_DONG';
+  ngayTao: string;
+  tenKhoaYeuCau?: string;
+  tenNguoiDang?: string;
+  tenThietBiGoc?: string;
 }
 
 // v4: PhieuCapPhat với ngày hạn trả và trạng thái trả

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { authMiddleware, roleMiddleware } from "../middleware/auth.js";
-import { getAllRequests, createRequest, approveDept, approveManager, scanRequest, processRequestItems, confirmReceived, deleteRequest, cancelRequest } from "../controllers/requestController.js";
+import { getAllRequests, createRequest, approveDept, approveManager, scanRequest, processRequestItems, confirmReceived, confirmTransfer, deleteRequest, cancelRequest } from "../controllers/requestController.js";
 
 const router = Router();
 
@@ -11,6 +11,7 @@ router.put("/:id/approve-mgr", authMiddleware, roleMiddleware("QL_KHO"), approve
 router.get("/:id/scan", authMiddleware, scanRequest);
 router.post("/:id/process-items", authMiddleware, roleMiddleware("NV_KHO", "QL_KHO"), processRequestItems);
 router.put("/:id/confirm", authMiddleware, confirmReceived);
+router.put("/:id/confirm-transfer", authMiddleware, confirmTransfer);
 
 router.put("/:id/cancel", authMiddleware, cancelRequest);
 router.delete("/:id", authMiddleware, roleMiddleware("QL_KHO"), deleteRequest);

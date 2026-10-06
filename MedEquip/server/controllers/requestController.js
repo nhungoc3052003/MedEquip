@@ -22,7 +22,11 @@ function mapRequest(row) {
     nguoiDuyet: row.nguoi_duyet,
     lyDoTuChoi: row.ly_do_tu_choi || "",
     maPhieuCapPhatCu: row.ma_phieu_cap_phat_cu || null,
-    anhMinhChung: row.anh_minh_chung || null
+    anhMinhChung: row.anh_minh_chung || null,
+    checklistKyThuat: row.checklist_ky_thuat ? (typeof row.checklist_ky_thuat === 'string' ? JSON.parse(row.checklist_ky_thuat) : row.checklist_ky_thuat) : null,
+    maNguoiNhanTest: row.ma_nguoi_nhan_test || null,
+    ngayTiepNhan: row.ngay_tiep_nhan || null,
+    maNhuCau: row.ma_nhu_cau || null
   };
 }
 
@@ -90,7 +94,7 @@ export async function createRequest(req, res) {
     const { 
       maNguoiYeuCau, maKhoa, lyDo, items,
       loaiDeXuat = 'CAP_PHAT', maKhoaNhan, maCaThe, duToanKinhPhi, mucDoUuTien = 'BINH_THUONG',
-      tenThietBiMoi, quyCachKyThuat
+      tenThietBiMoi, quyCachKyThuat, maNhuCau
     } = req.body;
 
     let prefix = 'YCCF-';
@@ -145,13 +149,13 @@ export async function createRequest(req, res) {
     await conn.query(
       `INSERT INTO phieu_yeu_cau 
         (ma_phieu, loai_de_xuat, ma_khoa_nhan, ma_ca_the, du_toan_kinh_phi, muc_do_uu_tien, ten_thiet_bi_moi, quy_cach_ky_thuat,
-         ma_nguoi_yeu_cau, ma_thiet_bi, ma_khoa, so_luong_yeu_cau, ly_do, trang_thai, ma_phieu_cap_phat_cu) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ma_nguoi_yeu_cau, ma_thiet_bi, ma_khoa, so_luong_yeu_cau, ly_do, trang_thai, ma_phieu_cap_phat_cu, ma_nhu_cau) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id, loaiDeXuat, maKhoaNhan || null, maCaThe || firstItem.maCaThe || null, 
         duToanKinhPhi || null, mucDoUuTien || 'BINH_THUONG', tenThietBiMoi || null, quyCachKyThuat || null,
         maNguoiYeuCau || req.user.userId, firstItem.maThietBi || 'TB', maKhoa, firstItem.soLuong || 1, 
-        lyDo || "", defaultStatus, req.body.maPhieuCapPhatCu || null
+        lyDo || "", defaultStatus, req.body.maPhieuCapPhatCu || null, maNhuCau || null
       ]
     );
 
@@ -200,15 +204,18 @@ export async function approveDept(req, res) {
     let items = req.body.items;
     const phieuId = req.params.id;
 
-    const [reqData] = await conn.query("SELECT ma_nguoi_yeu_cau, ma_thiet_bi, ma_khoa FROM phieu_yeu_cau WHERE ma_phieu = ?", [phieuId]);
+    const [reqData] = await conn.query("SELECT ma_nguoi_yeu_cau, ma_thiet_bi, ma_khoa, loai_de_xuat, ma_khoa_nhan, ma_ca_the FROM phieu_yeu_cau WHERE ma_phieu = ?", [phieuId]);
     if (reqData.length === 0) {
       await conn.rollback();
       return res.status(404).json({ success: false, message: "Không tìm thấy phiếu" });
     }
 
+    const currentReq = reqData[0];
+    const isTransfer = (currentReq.loai_de_xuat === 'DIEU_CHUYEN');
+
     if (!items || !Array.isArray(items)) {
       if (req.body.approved !== undefined) {
-        items = [{ maThietBi: reqData[0].ma_thiet_bi || 'TB', approved: !!req.body.approved, lyDo: req.body.lyDo || '' }];
+        items = [{ maThietBi: currentReq.ma_thiet_bi || 'TB', approved: !!req.body.approved, lyDo: req.body.lyDo || '' }];
       } else {
         await conn.rollback();
         return res.status(400).json({ success: false, message: "Dữ liệu không hợp lệ" });
@@ -232,23 +239,61 @@ export async function approveDept(req, res) {
         "UPDATE phieu_yeu_cau SET trang_thai = 'TU_CHOI', ly_do_tu_choi = ?, nguoi_duyet = ? WHERE ma_phieu = ?",
         [rejectReason, req.user.userId, phieuId]
       );
-    } else {
-      await conn.query(
-        "UPDATE phieu_yeu_cau SET trang_thai = 'CHO_QL_KHO_DUYET', ngay_duyet = NOW(), nguoi_duyet = ? WHERE ma_phieu = ?",
-        [req.user.userId, phieuId]
-      );
-      
-      const [qlKho] = await conn.query("SELECT ma_nguoi_dung FROM nguoi_dung WHERE vai_tro = 'QL_KHO'");
-      for(const ql of qlKho) {
-        await sendNotification(ql.ma_nguoi_dung, "Yêu cầu cần duyệt", `Có yêu cầu cấp phát ${phieuId} đã được Trưởng khoa duyệt ${approvedCount} thiết bị, đang chờ bạn xử lý.`, "info");
-      }
+      await sendNotification(currentReq.ma_nguoi_yeu_cau, "Đề xuất bị từ chối", `Đề xuất ${phieuId} của bạn đã bị từ chối bởi Trưởng khoa.`, "error");
+      await conn.commit();
+      return res.json({ success: true, newStatus: "TU_CHOI", message: "Đã từ chối tất cả." });
     }
 
-    const msg = isAllRejected ? `Yêu cầu cấp phát ${phieuId} của bạn đã bị từ chối hoàn toàn.` : `Yêu cầu cấp phát ${phieuId} của bạn đã được Trưởng khoa phê duyệt ${approvedCount} thiết bị, chờ QL Kho duyệt.`;
-    await sendNotification(reqData[0].ma_nguoi_yeu_cau, isAllRejected ? "Yêu cầu bị từ chối" : "Yêu cầu được chấp nhận", msg, isAllRejected ? "error" : "success");
+    if (isTransfer) {
+      // ĐIỀU CHUYỂN: Sau khi Trưởng khoa giao duyệt, chuyển ngay sang bước chờ Khoa nhận kiểm tra test máy
+      await conn.query(
+        "UPDATE phieu_yeu_cau SET trang_thai = 'CHO_KHOA_NHAN_TEST', ngay_duyet = NOW(), nguoi_duyet = ? WHERE ma_phieu = ?",
+        [req.user.userId, phieuId]
+      );
+
+      // Thông báo cho người yêu cầu
+      await sendNotification(currentReq.ma_nguoi_yeu_cau, "Đề xuất đã được duyệt", `Trưởng khoa đã phê duyệt đề xuất điều chuyển ${phieuId}. Máy đang chuyển giao cho Khoa nhận kiểm tra kỹ thuật.`, "success");
+
+      // Thông báo cho Khoa nhận (Trợ lý & Trưởng khoa)
+      if (currentReq.ma_khoa_nhan) {
+        const [receivers] = await conn.query(
+          "SELECT ma_nguoi_dung FROM nguoi_dung WHERE ma_khoa = ? AND vai_tro IN ('TRO_LY', 'TRUONG_KHOA')",
+          [currentReq.ma_khoa_nhan]
+        );
+        for (const r of receivers) {
+          await sendNotification(
+            r.ma_nguoi_dung,
+            "Thiết bị điều chuyển chờ kiểm tra & tiếp nhận",
+            `Khoa bạn có một thiết bị điều chuyển (${currentReq.ma_ca_the || currentReq.ma_thiet_bi}) từ ${currentReq.ma_khoa}. Vui lòng kiểm tra kỹ thuật tại chỗ và tiếp nhận trên hệ thống.`,
+            "warning"
+          );
+        }
+      }
+
+      await conn.commit();
+      return res.json({ 
+        success: true, 
+        newStatus: "CHO_KHOA_NHAN_TEST", 
+        message: "Trưởng khoa đã duyệt đề xuất điều chuyển. Chuyển sang bước kiểm tra & tiếp nhận tại Khoa nhận." 
+      });
+    }
+
+    // Luồng thông thường (Cấp phát kho / Báo hỏng / Mua sắm)
+    await conn.query(
+      "UPDATE phieu_yeu_cau SET trang_thai = 'CHO_QL_KHO_DUYET', ngay_duyet = NOW(), nguoi_duyet = ? WHERE ma_phieu = ?",
+      [req.user.userId, phieuId]
+    );
+    
+    const [qlKho] = await conn.query("SELECT ma_nguoi_dung FROM nguoi_dung WHERE vai_tro = 'QL_KHO'");
+    for(const ql of qlKho) {
+      await sendNotification(ql.ma_nguoi_dung, "Yêu cầu cần duyệt", `Có yêu cầu cấp phát ${phieuId} đã được Trưởng khoa duyệt ${approvedCount} thiết bị, đang chờ bạn xử lý.`, "info");
+    }
+
+    const msg = `Yêu cầu cấp phát ${phieuId} của bạn đã được Trưởng khoa phê duyệt ${approvedCount} thiết bị, chờ QL Kho duyệt.`;
+    await sendNotification(currentReq.ma_nguoi_yeu_cau, "Yêu cầu được chấp nhận", msg, "success");
 
     await conn.commit();
-    res.json({ success: true, newStatus: isAllRejected ? "TU_CHOI" : "CHO_QL_KHO_DUYET", message: isAllRejected ? "Đã từ chối tất cả." : "Đã duyệt." });
+    res.json({ success: true, newStatus: "CHO_QL_KHO_DUYET", message: "Đã duyệt." });
   } catch (err) {
     try { await conn.rollback(); } catch(e) {}
     console.error(err);
@@ -558,6 +603,101 @@ export async function confirmReceived(req, res) {
     res.json({ success: true, message: "Đã xác nhận nhận hàng." });
   } catch (err) {
     res.status(500).json({ success: false, message: "Lỗi máy chủ." });
+  }
+}
+
+export async function confirmTransfer(req, res) {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const phieuId = req.params.id;
+    const { checklist, ghiChu } = req.body;
+
+    const [rows] = await conn.query("SELECT * FROM phieu_yeu_cau WHERE ma_phieu = ?", [phieuId]);
+    if (rows.length === 0) {
+      await conn.rollback();
+      return res.status(404).json({ success: false, message: "Không tìm thấy phiếu điều chuyển." });
+    }
+    const phieu = rows[0];
+    if (phieu.loai_de_xuat !== 'DIEU_CHUYEN') {
+      await conn.rollback();
+      return res.status(400).json({ success: false, message: "Phiếu này không phải là đề xuất điều chuyển." });
+    }
+
+    if (phieu.trang_thai === 'HOAN_THANH') {
+      await conn.rollback();
+      return res.status(400).json({ success: false, message: "Phiếu điều chuyển này đã hoàn thành trước đó." });
+    }
+
+    const maCaThe = phieu.ma_ca_the;
+    const maKhoaNhan = phieu.ma_khoa_nhan;
+
+    // 1. Cập nhật vị trí của cá thể thiết bị sang khoa nhận
+    if (maCaThe && maKhoaNhan) {
+      await conn.query(
+        "UPDATE ca_the_thiet_bi SET ma_khoa_hien_tai = ?, vi_tri_hien_tai = ?, trang_thai = 'DANG_SU_DUNG', ngay_cap_nhat = NOW() WHERE ma_ca_the = ?",
+        [maKhoaNhan, maKhoaNhan, maCaThe]
+      );
+    }
+
+    // 2. Cập nhật trạng thái phiếu và checklist kỹ thuật
+    const checklistStr = checklist ? JSON.stringify(checklist) : null;
+    await conn.query(
+      `UPDATE phieu_yeu_cau 
+       SET trang_thai = 'HOAN_THANH', checklist_ky_thuat = ?, ma_nguoi_nhan_test = ?, ngay_tiep_nhan = NOW() 
+       WHERE ma_phieu = ?`,
+      [checklistStr, req.user.userId, phieuId]
+    );
+
+    await conn.query(
+      "UPDATE chi_tiet_yeu_cau SET trang_thai = 'DA_DUYET' WHERE ma_phieu_yeu_cau = ?",
+      [phieuId]
+    );
+
+    // 3. Nếu phiếu điều chuyển gắn liền với Nhu cầu nội viện, cập nhật tiến độ đáp ứng
+    if (phieu.ma_nhu_cau) {
+      await conn.query(
+        `UPDATE nhu_cau_thiet_bi 
+         SET so_luong_da_dap_ung = so_luong_da_dap_ung + 1,
+             trang_thai = CASE WHEN (so_luong_da_dap_ung + 1) >= so_luong_can THEN 'HOAN_THANH' ELSE 'DANG_TIM_KIEM' END
+         WHERE ma_nhu_cau = ?`,
+        [phieu.ma_nhu_cau]
+      );
+    }
+
+    // 4. Lấy tên khoa gửi và nhận
+    const [deptA] = await conn.query("SELECT ten_khoa FROM khoa WHERE ma_khoa = ?", [phieu.ma_khoa]);
+    const [deptB] = await conn.query("SELECT ten_khoa FROM khoa WHERE ma_khoa = ?", [maKhoaNhan]);
+    const tenKhoaA = deptA[0]?.ten_khoa || phieu.ma_khoa;
+    const tenKhoaB = deptB[0]?.ten_khoa || maKhoaNhan;
+
+    // 5. Gửi thông báo cho người lập đề xuất (Khoa giao)
+    await sendNotification(
+      phieu.ma_nguoi_yeu_cau,
+      "Bàn giao điều chuyển thành công",
+      `${tenKhoaB} đã kiểm tra kỹ thuật đạt chuẩn và chính thức tiếp nhận máy (${maCaThe || phieu.ma_thiet_bi}).`,
+      "success"
+    );
+
+    // 6. Gửi thông báo tự động cho Quản lý kho (QL_KHO) để kiểm toán
+    const [qlKho] = await conn.query("SELECT ma_nguoi_dung FROM nguoi_dung WHERE vai_tro = 'QL_KHO'");
+    for (const ql of qlKho) {
+      await sendNotification(
+        ql.ma_nguoi_dung,
+        "Tự động cập nhật vị trí thiết bị",
+        `Hệ thống tự động: Thiết bị ${maCaThe || phieu.ma_thiet_bi} đã hoàn tất kiểm tra và bàn giao từ ${tenKhoaA} sang ${tenKhoaB}. Hồ sơ tài sản đã được cập nhật.`,
+        "info"
+      );
+    }
+
+    await conn.commit();
+    res.json({ success: true, message: "Kiểm tra kỹ thuật và tiếp nhận thiết bị thành công! Hồ sơ đã tự động hoàn tất." });
+  } catch (err) {
+    try { await conn.rollback(); } catch(e) {}
+    console.error("Error confirming transfer:", err);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ khi tiếp nhận thiết bị: " + err.message });
+  } finally {
+    try { conn.release(); } catch(e) {}
   }
 }
 

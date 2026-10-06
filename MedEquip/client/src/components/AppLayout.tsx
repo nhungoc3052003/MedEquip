@@ -8,13 +8,13 @@ import { Badge } from '@/components/ui/badge';
 import {
   Hospital, LayoutDashboard, Package, Truck, Building2, FolderOpen,
   FileText, FileInput, FileOutput, ClipboardCheck, Bell, Users,
-  LogOut, ChevronLeft, Menu, AlertTriangle, UserCircle, BarChart3, RotateCcw, Wrench, QrCode
+  LogOut, ChevronLeft, Menu, AlertTriangle, UserCircle, BarChart3, RotateCcw, Wrench, QrCode, ArrowLeftRight
 } from 'lucide-react';
 import { AssetLookupModal } from '@/components/AssetLookupModal';
 
 export type PageKey =
   | 'dashboard' | 'inventory' | 'imports' | 'exports' | 'suppliers' | 'departments'
-  | 'requests' | 'returns' | 'maintenance' | 'users' | 'notifications' | 'profile' | 'reports';
+  | 'requests' | 'transfers' | 'returns' | 'maintenance' | 'users' | 'notifications' | 'profile' | 'reports';
 
 interface NavItem {
   key: PageKey;
@@ -29,6 +29,7 @@ const navItems: NavItem[] = [
   { key: 'suppliers', label: 'Nhà cung cấp', icon: <Truck className="w-5 h-5" />, roles: ['ADMIN', 'QL_KHO'] },
   { key: 'departments', label: 'Khoa', icon: <Building2 className="w-5 h-5" />, roles: ['ADMIN', 'QL_KHO'] },
   { key: 'requests', label: 'Yêu cầu cấp phát', icon: <FileText className="w-5 h-5" />, roles: ['ADMIN', 'TRUONG_KHOA', 'NV_KHO', 'QL_KHO', 'TRO_LY'] },
+  { key: 'transfers', label: 'Điều chuyển', icon: <ArrowLeftRight className="w-5 h-5" />, roles: ['ADMIN', 'TRUONG_KHOA', 'NV_KHO', 'QL_KHO', 'TRO_LY'] },
   { key: 'returns', label: 'Trả thiết bị', icon: <RotateCcw className="w-5 h-5" />, roles: ['ADMIN', 'TRUONG_KHOA', 'NV_KHO', 'QL_KHO', 'TRO_LY'] },
   { key: 'maintenance', label: 'Bảo trì thiết bị', icon: <Wrench className="w-5 h-5" />, roles: ['ADMIN', 'NV_KHO', 'QL_KHO', 'TRUONG_KHOA', 'TRO_LY'] },
   { key: 'reports', label: 'Báo cáo thống kê', icon: <BarChart3 className="w-5 h-5" />, roles: ['ADMIN', 'TRUONG_KHOA', 'QL_KHO'] },
@@ -65,6 +66,13 @@ export default function AppLayout({ currentPage, onNavigate, children }: AppLayo
     const d = n.noiDung.toLowerCase();
     const isTra = t.includes('trả') || d.includes('trả');
     return !isTra && (t.includes('cấp phát') || t.includes('yêu cầu') || d.includes('cấp phát') || d.includes('yêu cầu'));
+  }).length;
+
+  const unreadTransfersCount = store.getNotifications().filter(n => {
+    if (n.nguoiNhan !== user.maNguoiDung || n.daDoc) return false;
+    const t = n.tieuDe.toLowerCase();
+    const d = n.noiDung.toLowerCase();
+    return t.includes('điều chuyển') || d.includes('điều chuyển') || t.includes('nhu cầu') || d.includes('nhu cầu');
   }).length;
 
   const unreadReturnsCount = store.getNotifications().filter(n => {
@@ -112,6 +120,11 @@ export default function AppLayout({ currentPage, onNavigate, children }: AppLayo
             {item.key === 'requests' && unreadRequestsCount > 0 && !collapsed && (
               <Badge variant="destructive" className="ml-auto text-xs h-5 min-w-5 flex items-center justify-center">
                 {unreadRequestsCount}
+              </Badge>
+            )}
+            {item.key === 'transfers' && unreadTransfersCount > 0 && !collapsed && (
+              <Badge variant="destructive" className="ml-auto text-xs h-5 min-w-5 flex items-center justify-center">
+                {unreadTransfersCount}
               </Badge>
             )}
             {item.key === 'returns' && unreadReturnsCount > 0 && !collapsed && (

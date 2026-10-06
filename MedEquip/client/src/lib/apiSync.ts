@@ -224,6 +224,7 @@ export async function apiCreateRequest(data: {
   quyCachKyThuat?: string;
   soLuong?: number;
   donViTinh?: string;
+  maNhuCau?: string;
 }) {
   if (isMockMode()) {
     const phieu: PhieuYeuCauCapPhat = {
@@ -241,7 +242,8 @@ export async function apiCreateRequest(data: {
       duToanKinhPhi: data.duToanKinhPhi,
       mucDoUuTien: data.mucDoUuTien as any,
       tenThietBiMoi: data.tenThietBiMoi,
-      quyCachKyThuat: data.quyCachKyThuat
+      quyCachKyThuat: data.quyCachKyThuat,
+      maNhuCau: data.maNhuCau
     };
     const requests = store.getRequests();
     requests.push(phieu);
@@ -704,3 +706,52 @@ export async function apiCancelReturn(id: string) {
   }
   return result;
 }
+
+// ---- Transfers & Needs Bulletin ----
+export async function apiGetNeeds() {
+  if (isMockMode()) {
+    return { success: true, data: [] };
+  }
+  return fetchApi<any>('/needs');
+}
+
+export async function apiCreateNeed(data: {
+  maKhoaYeuCau: string;
+  maThietBi?: string;
+  tenThietBi: string;
+  soLuongCan: number;
+  mucDoUuTien: 'BINH_THUONG' | 'KHAN_CAP';
+  lyDo?: string;
+}) {
+  if (isMockMode()) {
+    return { success: true, message: 'Đã tạo nhu cầu thiết bị thành công (mock).' };
+  }
+  return fetchApi<any>('/needs', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function apiCloseNeed(id: string) {
+  if (isMockMode()) {
+    return { success: true };
+  }
+  return fetchApi<any>(`/needs/${id}/close`, { method: 'PUT' });
+}
+
+export async function apiConfirmTransfer(maPhieu: string, data: { checklist: any; ghiChu?: string }) {
+  if (isMockMode()) {
+    const requests = store.getRequests();
+    store.setRequests(requests.map(r => r.maPhieu === maPhieu ? {
+      ...r,
+      trangThai: 'HOAN_THANH',
+      checklistKyThuat: data.checklist,
+      ngayTiepNhan: new Date().toISOString()
+    } : r));
+    return { success: true, message: "Đã xác nhận kiểm tra và tiếp nhận máy." };
+  }
+  const result = await fetchApi<any>(`/requests/${maPhieu}/confirm-transfer`, { method: 'PUT', body: JSON.stringify(data) });
+  if (result.success) {
+    await refreshData('requests');
+    await refreshData('equipment');
+  }
+  return result;
+}
+

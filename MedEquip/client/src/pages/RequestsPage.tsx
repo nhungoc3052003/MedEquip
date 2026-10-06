@@ -100,11 +100,11 @@ export default function RequestsPage() {
 
   // Lọc tùy chỉnh & Lọc phân loại đề xuất
   const [filterDept, setFilterDept] = useState('all');
-  const [tabProposal, setTabProposal] = useState<'ALL' | 'CAP_PHAT' | 'DIEU_CHUYEN' | 'MUA_SAM' | 'BAO_HONG'>('ALL');
+  const [tabProposal, setTabProposal] = useState<'ALL' | 'CAP_PHAT' | 'MUA_SAM' | 'BAO_HONG'>('ALL');
 
   // Modal tạo đề xuất mới
   const [newProposalOpen, setNewProposalOpen] = useState(false);
-  const [proposalType, setProposalType] = useState<'DIEU_CHUYEN' | 'MUA_SAM' | 'BAO_HONG'>('DIEU_CHUYEN');
+  const [proposalType, setProposalType] = useState<'MUA_SAM' | 'BAO_HONG'>('MUA_SAM');
 
   // Dữ liệu cho Điều chuyển & Báo hỏng (lấy từ cá thể máy khoa đang giữ)
   const [deptInstances, setDeptInstances] = useState<any[]>([]);
@@ -243,6 +243,9 @@ export default function RequestsPage() {
       // NV Kho chỉ thấy phiếu khi đã qua bước QL Kho
       list = list.filter(r => ['DA_QL_KHO_DUYET', 'DA_CAP_PHAT'].includes(r.trangThai));
     }
+
+    // Tách riêng luồng Điều chuyển sang trang chuyên biệt
+    list = list.filter(r => r.loaiDeXuat !== 'DIEU_CHUYEN');
 
     return list.filter(r => {
       const matchSearch = r.maPhieu.toLowerCase().includes(search.toLowerCase()) ||
@@ -1209,7 +1212,7 @@ export default function RequestsPage() {
               className={cn("h-8 text-xs rounded-lg font-medium", tabProposal === 'ALL' ? "bg-primary text-primary-foreground font-semibold shadow-xs" : "text-muted-foreground")}
               onClick={() => setTabProposal('ALL')}
             >
-              Tất cả ({requests.length})
+              Tất cả ({requests.filter(r => r.loaiDeXuat !== 'DIEU_CHUYEN').length})
             </Button>
             <Button
               variant={tabProposal === 'CAP_PHAT' ? 'default' : 'ghost'}
@@ -1219,15 +1222,6 @@ export default function RequestsPage() {
             >
               <ShoppingCart className="w-3.5 h-3.5" />
               Cấp phát kho ({requests.filter(r => (r.loaiDeXuat || 'CAP_PHAT') === 'CAP_PHAT').length})
-            </Button>
-            <Button
-              variant={tabProposal === 'DIEU_CHUYEN' ? 'default' : 'ghost'}
-              size="sm"
-              className={cn("h-8 text-xs rounded-lg font-medium gap-1.5", tabProposal === 'DIEU_CHUYEN' ? "bg-purple-600 text-white font-semibold shadow-xs" : "text-muted-foreground")}
-              onClick={() => setTabProposal('DIEU_CHUYEN')}
-            >
-              <ArrowRightLeft className="w-3.5 h-3.5" />
-              Điều chuyển ({requests.filter(r => r.loaiDeXuat === 'DIEU_CHUYEN').length})
             </Button>
             <Button
               variant={tabProposal === 'MUA_SAM' ? 'default' : 'ghost'}
@@ -1582,21 +1576,7 @@ export default function RequestsPage() {
 
           <div className="p-5 flex-1 overflow-y-auto space-y-5 bg-muted/10">
             {/* Tabs chọn loại đề xuất */}
-            <div className="grid grid-cols-3 gap-2 p-1.5 bg-muted/40 rounded-xl border">
-              <button
-                type="button"
-                onClick={() => setProposalType('DIEU_CHUYEN')}
-                className={cn(
-                  "flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-bold transition-all",
-                  proposalType === 'DIEU_CHUYEN' 
-                    ? "bg-purple-600 text-white shadow-sm" 
-                    : "text-muted-foreground hover:bg-muted"
-                )}
-              >
-                <ArrowRightLeft className="w-4 h-4" />
-                <span>1. Điều chuyển thiết bị</span>
-              </button>
-
+            <div className="grid grid-cols-2 gap-2 p-1.5 bg-muted/40 rounded-xl border">
               <button
                 type="button"
                 onClick={() => setProposalType('MUA_SAM')}
@@ -1608,7 +1588,7 @@ export default function RequestsPage() {
                 )}
               >
                 <ShoppingBag className="w-4 h-4" />
-                <span>2. Đề xuất mua sắm mới</span>
+                <span>1. Đề xuất mua sắm mới</span>
               </button>
 
               <button
@@ -1622,87 +1602,9 @@ export default function RequestsPage() {
                 )}
               >
                 <Wrench className="w-4 h-4" />
-                <span>3. Báo hỏng & Sửa chữa</span>
+                <span>2. Báo hỏng & Sửa chữa</span>
               </button>
             </div>
-
-            {/* Form nội dung cho từng loại đề xuất */}
-            {proposalType === 'DIEU_CHUYEN' && (
-              <div className="space-y-4 bg-card p-5 rounded-xl border shadow-sm">
-                <div className="border-b pb-3 mb-3">
-                  <h3 className="font-bold text-base text-purple-900 flex items-center gap-2">
-                    <ArrowRightLeft className="w-5 h-5 text-purple-600" />
-                    Đề xuất điều chuyển thiết bị sang khoa khác
-                  </h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Hỗ trợ điều chuyển máy cá thể khoa đang mượn/sử dụng sang khoa phòng khác có nhu cầu điều trị.
-                  </p>
-                </div>
-
-                <div className="grid gap-4">
-                  <div>
-                    <Label className="mb-1 block text-sm font-semibold">
-                      Chọn thiết bị & Mã cá thể tại khoa ({user?.maKhoa || khoaYeuCau}) <span className="text-destructive">*</span>
-                    </Label>
-                    {loadingDeptInstances ? (
-                      <div className="text-xs text-muted-foreground italic py-2">Đang tải danh sách thiết bị khoa đang giữ...</div>
-                    ) : deptInstances.length === 0 ? (
-                      <div className="text-xs text-amber-700 bg-amber-50 p-3 rounded-lg border border-amber-200">
-                        Khoa hiện chưa có thiết bị nào đang mượn / sử dụng để điều chuyển.
-                      </div>
-                    ) : (
-                      <SearchableSelect
-                        options={deptInstances.map(i => ({
-                          value: i.maCaThe,
-                          label: `${i.maCaThe} - ${i.tenThietBi} ${i.serialNumber ? `(Serial: ${i.serialNumber})` : ''}`
-                        }))}
-                        value={transferInstance}
-                        onValueChange={setTransferInstance}
-                        placeholder="Tìm và Chọn mã máy cá thể cần chuyển..."
-                      />
-                    )}
-                  </div>
-
-                  <div>
-                    <Label className="mb-1 block text-sm font-semibold">
-                      Khoa tiếp nhận thiết bị <span className="text-destructive">*</span>
-                    </Label>
-                    <SearchableSelect
-                      options={departments.filter(d => d.maKhoa !== (user?.maKhoa || khoaYeuCau)).map(k => ({
-                        value: k.maKhoa,
-                        label: k.tenKhoa
-                      }))}
-                      value={transferDestDept}
-                      onValueChange={setTransferDestDept}
-                      placeholder="Chọn khoa tiếp nhận..."
-                    />
-                  </div>
-
-                  <div>
-                    <Label className="mb-1 block text-sm font-semibold">
-                      Lý do & Mục đích điều chuyển <span className="text-destructive">*</span>
-                    </Label>
-                    <Textarea
-                      value={transferReason}
-                      onChange={e => setTransferReason(e.target.value)}
-                      placeholder="Ví dụ: Chi viện phòng cấp cứu do quá tải bệnh nhân, hoặc hỗ trợ khoa Nhi hồi sức..."
-                      className="h-24 resize-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end pt-3 border-t">
-                  <Button
-                    onClick={handleSubmitTransfer}
-                    className="bg-purple-600 hover:bg-purple-700 text-white gap-2 shadow-sm"
-                    disabled={!transferInstance || !transferDestDept || !transferReason.trim()}
-                  >
-                    <Send className="w-4 h-4" />
-                    Gửi đề xuất điều chuyển
-                  </Button>
-                </div>
-              </div>
-            )}
 
             {proposalType === 'MUA_SAM' && (
               <div className="space-y-4 bg-card p-5 rounded-xl border shadow-sm">

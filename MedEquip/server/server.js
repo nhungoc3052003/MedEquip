@@ -19,6 +19,7 @@ import reportRoutes from "./routes/reports.js";
 import returnRoutes from "./routes/returns.js";
 import maintenanceRoutes from "./routes/maintenance.js";
 import instanceRoutes from "./routes/instances.js";
+import needsRoutes from "./routes/needs.js";
 import { checkAndSendDueNotifications } from "./services/dueNotificationService.js";
 
 dotenv.config();
@@ -77,6 +78,7 @@ app.use("/api/reports", reportRoutes);
 app.use("/api/returns", returnRoutes);
 app.use("/api/maintenance", maintenanceRoutes);
 app.use("/api/instances", instanceRoutes);
+app.use("/api/needs", needsRoutes);
 
 // 404 Handler
 app.use((req, res) => {

@@ -9,6 +9,7 @@ import ExportsPage from '@/pages/ExportsPage';
 import SuppliersPage from '@/pages/SuppliersPage';
 import DepartmentsPage from '@/pages/DepartmentsPage';
 import RequestsPage from '@/pages/RequestsPage';
+import TransfersPage from '@/pages/TransfersPage';
 import ReturnsPage from '@/pages/ReturnsPage';
 import UsersPage from '@/pages/UsersPage';
 import NotificationsPage from '@/pages/NotificationsPage';
@@ -24,6 +25,7 @@ const pages: Record<PageKey, React.ComponentType> = {
   suppliers: SuppliersPage,
   departments: DepartmentsPage,
   requests: RequestsPage,
+  transfers: TransfersPage,
   returns: ReturnsPage,
   maintenance: MaintenancePage,
   users: UsersPage,
