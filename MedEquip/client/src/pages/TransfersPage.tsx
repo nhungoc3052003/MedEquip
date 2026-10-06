@@ -214,7 +214,7 @@ export default function TransfersPage() {
     try {
       const res = await apiCloseNeed(id);
       if (res.success) {
-        toast({ title: 'Đã đóng tin', description: 'Tin nhu cầu thiết bị đã được chuyển sang trạng thái đóng.' });
+        toast({ title: 'Đã dừng tìm kiếm', description: 'Nhu cầu thiết bị đã được hủy và ngưng kêu gọi hỗ trợ.' });
         loadNeeds();
       }
     } catch (e: any) {
@@ -691,16 +691,17 @@ export default function TransfersPage() {
                       </div>
 
                       <div className="flex items-center gap-1.5">
-                        {/* Nút đóng tin */}
+                        {/* Nút hủy tìm kiếm */}
                         {(isMyDept || isQlKho) && need.trangThai === 'DANG_TIM_KIEM' && (
                           <Button
                             size="sm"
-                            variant="ghost"
+                            variant="outline"
                             onClick={() => handleCloseNeed(need.maNhuCau)}
-                            className="h-7 text-xs text-muted-foreground hover:text-destructive px-2"
-                            title="Đóng tin nhu cầu này"
+                            className="h-8 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 border-rose-200 gap-1 px-2.5 font-medium"
+                            title="Hủy tìm kiếm và ngưng kêu gọi hỗ trợ thiết bị này"
                           >
-                            Đóng
+                            <X className="w-3.5 h-3.5" />
+                            Hủy tìm kiếm
                           </Button>
                         )}
 
@@ -717,14 +718,16 @@ export default function TransfersPage() {
                         )}
 
                         {isCompleted && (
-                          <Badge variant="outline" className="text-emerald-700 bg-emerald-50 border-emerald-200 text-xs">
-                            Đã đáp ứng đủ
+                          <Badge variant="outline" className="text-emerald-700 bg-emerald-50 border-emerald-200 text-xs gap-1 py-1 px-2">
+                            <Check className="w-3 h-3 text-emerald-600" />
+                            Đã đáp ứng đủ máy
                           </Badge>
                         )}
 
                         {isClosed && (
-                          <Badge variant="outline" className="text-gray-500 bg-gray-50 border-gray-200 text-xs">
-                            Đã đóng
+                          <Badge variant="outline" className="text-slate-500 bg-slate-100 border-slate-200 text-xs gap-1 py-1 px-2">
+                            <Ban className="w-3 h-3 text-slate-400" />
+                            Đã dừng tìm kiếm
                           </Badge>
                         )}
                       </div>
