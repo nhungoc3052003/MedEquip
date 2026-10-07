@@ -143,8 +143,15 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
     setInstanceSearch('');
     setInstanceFilter(isTrưởngKhoa ? 'KHOA_PHONG' : 'ALL');
     try {
-      const data = await fetchApi<any[]>(`/instances?maThietBi=${tb.maThietBi}`);
-      setInstancesList(Array.isArray(data) ? data : []);
+      const url = isTrưởngKhoa
+        ? `/instances?maThietBi=${tb.maThietBi}&maKhoa=${targetDept}`
+        : `/instances?maThietBi=${tb.maThietBi}`;
+      const data = await fetchApi<any[]>(url);
+      const list = Array.isArray(data) ? data : [];
+      const finalList = isTrưởngKhoa 
+        ? list.filter(i => i.viTri !== 'KHO' && (!i.maKhoa || i.maKhoa === targetDept)) 
+        : list;
+      setInstancesList(finalList);
     } catch (err: any) {
       toast({ title: 'Lỗi', description: 'Không thể tải danh sách cá thể máy: ' + err.message, variant: 'destructive' });
       setInstancesList([]);
@@ -155,18 +162,22 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
 
   const filteredInstances = useMemo(() => {
     return instancesList.filter(inst => {
-      if (instanceFilter === 'KHO' && inst.viTri !== 'KHO') return false;
-      if (instanceFilter === 'KHOA_PHONG') {
-        if (inst.viTri !== 'KHOA_PHONG') return false;
-        if (isTrưởngKhoa && inst.maKhoa && inst.maKhoa !== targetDept) return false;
+      if (isTrưởngKhoa) {
+        // Trưởng khoa chỉ xem máy của khoa mình đang mượn, không xem máy tại kho
+        if (inst.viTri === 'KHO') return false;
+        if (inst.maKhoa && inst.maKhoa !== targetDept) return false;
+      } else {
+        if (instanceFilter === 'KHO' && inst.viTri !== 'KHO') return false;
+        if (instanceFilter === 'KHOA_PHONG' && inst.viTri !== 'KHOA_PHONG') return false;
+        if (instanceFilter === 'OTHER' && (inst.viTri === 'KHO' || inst.viTri === 'KHOA_PHONG')) return false;
       }
-      if (instanceFilter === 'OTHER' && (inst.viTri === 'KHO' || inst.viTri === 'KHOA_PHONG')) return false;
       if (instanceSearch) {
         const q = instanceSearch.toLowerCase().trim();
         return (
           inst.maCaThe?.toLowerCase().includes(q) ||
           inst.serialNumber?.toLowerCase().includes(q) ||
           inst.tenKhoa?.toLowerCase().includes(q) ||
+          inst.maPhieuCapPhat?.toLowerCase().includes(q) ||
           inst.ghiChu?.toLowerCase().includes(q)
         );
       }
@@ -471,29 +482,20 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
             />
           </div>
           
-          <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="w-full sm:w-[200px]">
-              <SelectValue placeholder="Lọc trạng thái" />
-            </SelectTrigger>
-            <SelectContent>
-              {isTrưởngKhoa ? (
-                <>
-                  <SelectItem value="ALL">Tất cả thiết bị mượn</SelectItem>
-                  <SelectItem value="CHUA_TRA">Đang sử dụng</SelectItem>
-                  <SelectItem value="YEU_CAU_TRA">Đang yêu cầu trả</SelectItem>
-                  <SelectItem value="DA_GIA_HAN">Đã gia hạn</SelectItem>
-                </>
-              ) : (
-                <>
-                  <SelectItem value="ALL">Tất cả thiết bị</SelectItem>
-                  <SelectItem value="TRONG_KHO">Đang có trong kho</SelectItem>
-                  <SelectItem value="DANG_DUNG">Đang được sử dụng</SelectItem>
-                  <SelectItem value="HU_HONG">Có thiết bị hư hỏng</SelectItem>
-                  <SelectItem value="HET_HANG">Đã hết sạch hàng</SelectItem>
-                </>
-              )}
-            </SelectContent>
-          </Select>
+          {!isTrưởngKhoa && (
+            <Select value={filterStatus} onValueChange={setFilterStatus}>
+              <SelectTrigger className="w-full sm:w-[200px]">
+                <SelectValue placeholder="Lọc trạng thái" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">Tất cả thiết bị</SelectItem>
+                <SelectItem value="TRONG_KHO">Đang có trong kho</SelectItem>
+                <SelectItem value="DANG_DUNG">Đang được sử dụng</SelectItem>
+                <SelectItem value="HU_HONG">Có thiết bị hư hỏng</SelectItem>
+                <SelectItem value="HET_HANG">Đã hết sạch hàng</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
 
           <Select value={sortOption} onValueChange={setSortOption}>
             <SelectTrigger className="w-full sm:w-[180px]">
@@ -523,6 +525,25 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-primary' : 'text-muted-foreground'}`} />
           </Button>
         </div>
+
+        {isTrưởngKhoa && filterStatus !== 'ALL' && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Đang lọc theo:</span>
+            <Badge 
+              variant="outline" 
+              className="cursor-pointer hover:bg-destructive/10 hover:text-destructive hover:border-destructive/40 transition-colors gap-1.5 text-xs py-1 px-3 bg-card"
+              onClick={() => setFilterStatus('ALL')}
+              title="Bấm để bỏ lọc và hiển thị tất cả"
+            >
+              <span className="font-semibold text-foreground">
+                {filterStatus === 'CHUA_TRA' && 'Đang sử dụng'}
+                {filterStatus === 'YEU_CAU_TRA' && 'Chờ duyệt trả'}
+                {filterStatus === 'DA_GIA_HAN' && 'Đã gia hạn'}
+              </span>
+              <X className="w-3.5 h-3.5 text-muted-foreground" />
+            </Badge>
+          </div>
+        )}
       </div>
 
       {!isTrưởngKhoa && (
@@ -749,12 +770,17 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
               <div>
                 <DialogTitle className="flex items-center gap-2 text-lg">
                   <QrCode className="w-5 h-5 text-primary" />
-                  Danh sách mã cá thể máy: {selectedEquipmentForInstances?.tenThietBi}
+                  {isTrưởngKhoa 
+                    ? `Mã máy cá thể khoa đang mượn: ${selectedEquipmentForInstances?.tenThietBi}`
+                    : `Danh sách mã cá thể máy: ${selectedEquipmentForInstances?.tenThietBi}`}
                 </DialogTitle>
                 <div className="text-xs text-muted-foreground mt-1 flex items-center gap-2">
                   <span>Mã danh mục: <strong className="font-mono text-foreground">{selectedEquipmentForInstances?.maThietBi}</strong></span>
                   <span>•</span>
-                  <span>Tổng số lượng: <strong className="text-primary">{instancesList.length} máy</strong></span>
+                  <span>
+                    {isTrưởngKhoa ? 'Số lượng tại khoa: ' : 'Tổng số lượng: '}
+                    <strong className="text-primary">{filteredInstances.length} máy</strong>
+                  </span>
                 </div>
               </div>
             </div>
@@ -763,35 +789,42 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
           <div className="p-6 flex-1 overflow-y-auto space-y-4">
             {/* Filter Tabs & Search */}
             <div className="flex flex-col sm:flex-row justify-between gap-3 items-start sm:items-center">
-              <div className="flex gap-1 bg-muted p-1 rounded-lg">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={instanceFilter === 'ALL' ? 'default' : 'ghost'}
-                  className="text-xs h-8"
-                  onClick={() => setInstanceFilter('ALL')}
-                >
-                  Tất cả ({instancesList.length})
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={instanceFilter === 'KHO' ? 'default' : 'ghost'}
-                  className="text-xs h-8 text-emerald-600 dark:text-emerald-400"
-                  onClick={() => setInstanceFilter('KHO')}
-                >
-                  Tại kho ({instancesList.filter(i => i.viTri === 'KHO').length})
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={instanceFilter === 'KHOA_PHONG' ? 'default' : 'ghost'}
-                  className="text-xs h-8 text-blue-600 dark:text-blue-400"
-                  onClick={() => setInstanceFilter('KHOA_PHONG')}
-                >
-                  Khoa phòng mượn ({instancesList.filter(i => i.viTri === 'KHOA_PHONG').length})
-                </Button>
-              </div>
+              {!isTrưởngKhoa ? (
+                <div className="flex gap-1 bg-muted p-1 rounded-lg">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={instanceFilter === 'ALL' ? 'default' : 'ghost'}
+                    className="text-xs h-8"
+                    onClick={() => setInstanceFilter('ALL')}
+                  >
+                    Tất cả ({instancesList.length})
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={instanceFilter === 'KHO' ? 'default' : 'ghost'}
+                    className="text-xs h-8 text-emerald-600 dark:text-emerald-400"
+                    onClick={() => setInstanceFilter('KHO')}
+                  >
+                    Tại kho ({instancesList.filter(i => i.viTri === 'KHO').length})
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={instanceFilter === 'KHOA_PHONG' ? 'default' : 'ghost'}
+                    className="text-xs h-8 text-blue-600 dark:text-blue-400"
+                    onClick={() => setInstanceFilter('KHOA_PHONG')}
+                  >
+                    Khoa phòng mượn ({instancesList.filter(i => i.viTri === 'KHOA_PHONG').length})
+                  </Button>
+                </div>
+              ) : (
+                <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-primary" />
+                  <span>Chỉ hiển thị các máy vật lý khoa đang trực tiếp mượn và quản lý</span>
+                </div>
+              )}
 
               <div className="relative w-full sm:w-64">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
@@ -811,7 +844,9 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
               </div>
             ) : filteredInstances.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground border rounded-xl bg-muted/10">
-                Không tìm thấy máy nào phù hợp với bộ lọc.
+                {isTrưởngKhoa 
+                  ? 'Khoa hiện không có mã máy cá thể nào thuộc danh mục này đang mượn.' 
+                  : 'Không tìm thấy máy nào phù hợp với bộ lọc.'}
               </div>
             ) : (
               <div className="border rounded-xl overflow-hidden shadow-sm">
@@ -820,7 +855,11 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
                     <tr>
                       <th className="text-left p-3 font-medium">Mã cá thể (Mã máy)</th>
                       <th className="text-left p-3 font-medium">Số Serial</th>
-                      <th className="text-left p-3 font-medium">Vị trí hiện tại</th>
+                      {isTrưởngKhoa ? (
+                        <th className="text-left p-3 font-medium">Phiếu cấp phát</th>
+                      ) : (
+                        <th className="text-left p-3 font-medium">Vị trí hiện tại</th>
+                      )}
                       <th className="text-center p-3 font-medium">Trạng thái</th>
                       <th className="text-right p-3 font-medium">Tem nhãn</th>
                     </tr>
@@ -836,24 +875,32 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
                         <td className="p-3 font-mono text-xs text-muted-foreground">
                           {inst.serialNumber || '---'}
                         </td>
-                        <td className="p-3">
-                          {inst.viTri === 'KHO' ? (
-                            <span className="inline-flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-                              <Warehouse className="w-3.5 h-3.5" /> Kho thiết bị
+                        {isTrưởngKhoa ? (
+                          <td className="p-3">
+                            <span className="font-mono text-xs text-primary font-medium bg-primary/5 px-2 py-1 rounded border border-primary/20">
+                              {inst.maPhieuCapPhat || 'CP-TRUC-TIEP'}
                             </span>
-                          ) : (
-                            <div className="text-xs">
-                              <span className="inline-flex items-center gap-1.5 text-blue-600 dark:text-blue-400 font-semibold">
-                                <Building2 className="w-3.5 h-3.5" /> {inst.tenKhoa || inst.maKhoa || 'Khoa phòng'}
+                          </td>
+                        ) : (
+                          <td className="p-3">
+                            {inst.viTri === 'KHO' ? (
+                              <span className="inline-flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                                <Warehouse className="w-3.5 h-3.5" /> Kho thiết bị
                               </span>
-                              {inst.maPhieuCapPhat && (
-                                <div className="text-[10px] text-muted-foreground font-mono">
-                                  Phiếu: {inst.maPhieuCapPhat}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </td>
+                            ) : (
+                              <div className="text-xs">
+                                <span className="inline-flex items-center gap-1.5 text-blue-600 dark:text-blue-400 font-semibold">
+                                  <Building2 className="w-3.5 h-3.5" /> {inst.tenKhoa || inst.maKhoa || 'Khoa phòng'}
+                                </span>
+                                {inst.maPhieuCapPhat && (
+                                  <div className="text-[10px] text-muted-foreground font-mono">
+                                    Phiếu: {inst.maPhieuCapPhat}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                        )}
                         <td className="p-3 text-center">
                           <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
                             inst.trangThai === 'SAN_SANG'
@@ -1115,11 +1162,11 @@ export default function InventoryPage() {
     <div key={refreshKey} className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-bold tracking-tight">
-          {isTrưởngKhoa ? 'Thiết bị đang mượn' : 'Quản lý kho'}
+          {isTrưởngKhoa ? 'Thiết bị trong khoa' : 'Quản lý kho'}
         </h1>
         <p className="text-muted-foreground">
           {isTrưởngKhoa 
-            ? 'Danh sách thiết bị mà khoa đang mượn và quản lý.' 
+            ? 'Danh sách thiết bị mà khoa đang quản lý và sử dụng.' 
             : 'Theo dõi tồn kho, quản lý nhập xuất và thiết bị.'}
         </p>
       </div>

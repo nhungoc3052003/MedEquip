@@ -104,24 +104,27 @@ export default function AppLayout({ currentPage, onNavigate, children }: AppLayo
       </div>
 
       <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-        {filteredNav.map(item => (
-          <button
-            key={item.key}
-            onClick={() => { onNavigate(item.key); setMobileOpen(false); }}
-            className={cn(
-              'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all',
-              currentPage === item.key
-                ? 'bg-sidebar-primary/20 text-sidebar-primary-foreground'
-                : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-            )}
-          >
-            {item.icon}
-            {!collapsed && <span className="truncate">{item.label}</span>}
-            {item.key === 'requests' && unreadRequestsCount > 0 && !collapsed && (
-              <Badge variant="destructive" className="ml-auto text-xs h-5 min-w-5 flex items-center justify-center">
-                {unreadRequestsCount}
-              </Badge>
-            )}
+        {filteredNav.map(item => {
+          const isDeptUser = user.vaiTro === 'TRUONG_KHOA' || user.vaiTro === 'TRO_LY';
+          const navLabel = (item.key === 'inventory' && isDeptUser) ? 'Thiết bị trong khoa' : item.label;
+          return (
+            <button
+              key={item.key}
+              onClick={() => { onNavigate(item.key); setMobileOpen(false); }}
+              className={cn(
+                'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all',
+                currentPage === item.key
+                  ? 'bg-sidebar-primary/20 text-sidebar-primary-foreground'
+                  : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+              )}
+            >
+              {item.icon}
+              {!collapsed && <span className="truncate">{navLabel}</span>}
+              {item.key === 'requests' && unreadRequestsCount > 0 && !collapsed && (
+                <Badge variant="destructive" className="ml-auto text-xs h-5 min-w-5 flex items-center justify-center">
+                  {unreadRequestsCount}
+                </Badge>
+              )}
             {item.key === 'transfers' && unreadTransfersCount > 0 && !collapsed && (
               <Badge variant="destructive" className="ml-auto text-xs h-5 min-w-5 flex items-center justify-center">
                 {unreadTransfersCount}
@@ -138,7 +141,8 @@ export default function AppLayout({ currentPage, onNavigate, children }: AppLayo
               </Badge>
             )}
           </button>
-        ))}
+        );
+      })}
       </nav>
 
       <div className="p-3 border-t border-sidebar-border">
@@ -197,7 +201,9 @@ export default function AppLayout({ currentPage, onNavigate, children }: AppLayo
               <ChevronLeft className={cn('w-5 h-5 transition-transform', collapsed && 'rotate-180')} />
             </Button>
             <h1 className="text-lg font-semibold text-foreground">
-              {navItems.find(n => n.key === currentPage)?.label || 'Tổng quan'}
+              {currentPage === 'inventory' && (user.vaiTro === 'TRUONG_KHOA' || user.vaiTro === 'TRO_LY')
+                ? 'Thiết bị trong khoa'
+                : (navItems.find(n => n.key === currentPage)?.label || 'Tổng quan')}
             </h1>
           </div>
 
