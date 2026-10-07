@@ -203,11 +203,18 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
   const data = useMemo(() => {
     let result: any[] = [];
     if (isTrưởngKhoa) {
-      // 1. Lọc các phiếu cấp phát của khoa chưa trả hoàn toàn
+      // 1. Lọc các phiếu cấp phát của khoa chưa trả hoàn toàn và khớp đúng trạng thái đang chọn
       const rawAllocs = allocations.filter(a => {
         const matchDept = (a.maKhoa === targetDept) || (a.maKhoaNhan === targetDept);
         const notReturned = a.trangThaiTra !== 'DA_TRA';
-        return matchDept && notReturned;
+        if (!matchDept || !notReturned) return false;
+
+        // Khi người dùng chọn lọc trạng thái cụ thể (ví dụ: Đang sử dụng), chỉ lấy các phiếu đúng trạng thái đó
+        if (filterStatus === 'CHUA_TRA') return a.trangThaiTra === 'CHUA_TRA';
+        if (filterStatus === 'YEU_CAU_TRA') return a.trangThaiTra === 'YEU_CAU_TRA';
+        if (filterStatus === 'DA_GIA_HAN') return a.trangThaiTra === 'DA_GIA_HAN';
+
+        return true;
       });
 
       // 2. Gom nhóm các phiếu cấp theo mã thiết bị (maThietBi)
@@ -268,18 +275,12 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
         return g;
       });
 
-      // 4. Lọc tìm kiếm và trạng thái
+      // 4. Lọc tìm kiếm
       result = groups.filter(g => {
         const matchSearch = String(g.thietBi?.tenThietBi || g.tenThietBi || '').toLowerCase().includes(search.toLowerCase()) ||
                             String(g.maThietBi || '').toLowerCase().includes(search.toLowerCase()) ||
                             g.allocationsList.some((a: any) => String(a.maPhieu || '').toLowerCase().includes(search.toLowerCase()));
-        if (!matchSearch) return false;
-
-        if (filterStatus === 'CHUA_TRA') return g.allocationsList.some((a: any) => a.trangThaiTra === 'CHUA_TRA');
-        if (filterStatus === 'YEU_CAU_TRA') return g.allocationsList.some((a: any) => a.trangThaiTra === 'YEU_CAU_TRA');
-        if (filterStatus === 'DA_GIA_HAN') return g.allocationsList.some((a: any) => a.trangThaiTra === 'DA_GIA_HAN');
-
-        return true;
+        return matchSearch;
       });
     } else {
       result = inventory.map(inv => ({
@@ -743,12 +744,7 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
                         </td>
                         <td className="p-4 text-center text-xs">
                           {d.soDotCap > 1 ? (
-                            <div>
-                              <div className="font-medium text-foreground">
-                                {d.ngayCapGanNhat ? new Date(d.ngayCapGanNhat).toLocaleDateString('vi-VN') : '—'}
-                              </div>
-                              <div className="text-[10px] text-muted-foreground">Mới nhất</div>
-                            </div>
+                            <span className="text-muted-foreground">—</span>
                           ) : (
                             <span className="text-muted-foreground">
                               {d.ngayCapPhat ? new Date(d.ngayCapPhat).toLocaleDateString('vi-VN') : '—'}
@@ -757,14 +753,7 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
                         </td>
                         <td className="p-4 text-center">
                           {d.soDotCap > 1 ? (
-                            <div className="text-xs">
-                              <span className={d.hanTraSomNhat && new Date(d.hanTraSomNhat) < new Date() ? 'text-destructive font-semibold' : 'text-muted-foreground'}>
-                                {d.hanTraSomNhat ? new Date(d.hanTraSomNhat).toLocaleDateString('vi-VN') : '—'}
-                              </span>
-                              {d.hanTraSomNhat && new Date(d.hanTraSomNhat) < new Date() && (
-                                <div className="text-[10px] text-destructive font-semibold">Có đợt quá hạn</div>
-                              )}
-                            </div>
+                            <span className="text-muted-foreground text-xs">—</span>
                           ) : (
                             <span className={`text-xs ${d.ngayDuKienTra && new Date(d.ngayDuKienTra) < new Date() ? 'text-destructive font-semibold' : 'text-muted-foreground'}`}>
                               {d.ngayDuKienTra ? new Date(d.ngayDuKienTra).toLocaleDateString('vi-VN') : '—'}
