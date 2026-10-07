@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { store } from '@/lib/store';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { 
   Search, Package, FileInput, FileOutput, Trash2, Pencil, X, Eye, Plus, 
   Image as ImageIcon, QrCode, Printer, Building2, Warehouse, Download, Tag,
-  Clock, CheckCircle2, AlertTriangle, ArrowRight, RefreshCw, Cpu
+  Clock, CheckCircle2, AlertTriangle, ArrowRight, RefreshCw, Cpu,
+  ChevronDown, ChevronUp, Layers
 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -41,6 +42,10 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
   const [instanceFilter, setInstanceFilter] = useState<'ALL' | 'KHO' | 'KHOA_PHONG' | 'OTHER'>('ALL');
   const [qrModalItem, setQrModalItem] = useState<any>(null);
   const [deptInstancesModalOpen, setDeptInstancesModalOpen] = useState(false);
+  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
+  const toggleExpand = (maThietBi: string) => {
+    setExpandedItems(prev => ({ ...prev, [maThietBi]: !prev[maThietBi] }));
+  };
 
   const isTrưởngKhoa = user?.vaiTro === 'TRUONG_KHOA' || user?.vaiTro === 'TRO_LY';
   const isAdmin = user?.vaiTro === 'ADMIN';
@@ -198,42 +203,84 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
   const data = useMemo(() => {
     let result: any[] = [];
     if (isTrưởngKhoa) {
-      result = allocations
-        .filter(a => {
-          const matchDept = (a.maKhoa === targetDept) || (a.maKhoaNhan === targetDept);
-          const notReturned = a.trangThaiTra !== 'DA_TRA';
-          return matchDept && notReturned;
-        })
-        .map((a, idx) => {
-          const eq = equipment.find(e => e.maThietBi === a.maThietBi) || {
-            maThietBi: a.maThietBi,
-            tenThietBi: a.tenThietBi || a.maThietBi,
+      // 1. Lọc các phiếu cấp phát của khoa chưa trả hoàn toàn
+      const rawAllocs = allocations.filter(a => {
+        const matchDept = (a.maKhoa === targetDept) || (a.maKhoaNhan === targetDept);
+        const notReturned = a.trangThaiTra !== 'DA_TRA';
+        return matchDept && notReturned;
+      });
+
+      // 2. Gom nhóm các phiếu cấp theo mã thiết bị (maThietBi)
+      const groupsMap = new Map<string, any>();
+      for (const a of rawAllocs) {
+        const code = a.maThietBi || 'UNKNOWN';
+        if (!groupsMap.has(code)) {
+          const eq = equipment.find(e => e.maThietBi === code) || {
+            maThietBi: code,
+            tenThietBi: a.tenThietBi || code,
             loaiThietBi: a.loaiThietBi || 'TAI_SU_DUNG',
             donViCoSo: a.donViTinh || 'Cái',
             moTa: ''
           };
-          return {
-            ...a,
+          groupsMap.set(code, {
+            maThietBi: code,
             thietBi: eq,
-            soLuongKho: 0, 
-            soLuongDangDung: a.soLuongCapPhat,
+            tenThietBi: eq.tenThietBi,
+            allocationsList: [],
+            soLuongDangDung: 0,
+            soLuongKho: 0,
             soLuongHu: 0,
-            maTonKho: `${a.maPhieu}-${a.maThietBi || 'item'}-${a.id || idx}`,
-            donGia: 0
-          };
-        })
-        .filter(d => {
-          const matchSearch = String(d.thietBi?.tenThietBi || d.tenThietBi || '').toLowerCase().includes(search.toLowerCase()) ||
-                              String(d.maThietBi || '').toLowerCase().includes(search.toLowerCase()) ||
-                              String(d.maPhieu || '').toLowerCase().includes(search.toLowerCase());
-          if (!matchSearch) return false;
+            maTonKho: `grp-${code}`,
+            donGia: 0,
+          });
+        }
+        const g = groupsMap.get(code);
+        g.allocationsList.push(a);
+        g.soLuongDangDung += (Number(a.soLuongCapPhat) || 0);
+      }
 
-          if (filterStatus === 'CHUA_TRA') return d.trangThaiTra === 'CHUA_TRA';
-          if (filterStatus === 'YEU_CAU_TRA') return d.trangThaiTra === 'YEU_CAU_TRA';
-          if (filterStatus === 'DA_GIA_HAN') return d.trangThaiTra === 'DA_GIA_HAN';
+      // 3. Chuẩn hóa dữ liệu từng nhóm thiết bị
+      let groups = Array.from(groupsMap.values()).map(g => {
+        // Sắp xếp các phiếu cấp con theo ngày cấp mới nhất
+        g.allocationsList.sort((x: any, y: any) => new Date(y.ngayCapPhat || 0).getTime() - new Date(x.ngayCapPhat || 0).getTime());
+        g.soDotCap = g.allocationsList.length;
 
-          return true;
-        });
+        // Ngày cấp gần nhất
+        g.ngayCapGanNhat = g.allocationsList[0]?.ngayCapPhat || null;
+        g.ngayCapPhat = g.ngayCapGanNhat;
+
+        // Hạn trả sớm nhất cần chú ý
+        const validDueDates = g.allocationsList
+          .map((a: any) => a.ngayDuKienTra)
+          .filter(Boolean)
+          .sort((x: any, y: any) => new Date(x).getTime() - new Date(y).getTime());
+        g.hanTraSomNhat = validDueDates[0] || null;
+        g.ngayDuKienTra = g.hanTraSomNhat;
+
+        // Trạng thái tổng hợp
+        const distinctStatuses = Array.from(new Set(g.allocationsList.map((a: any) => a.trangThaiTra || 'CHUA_TRA')));
+        g.distinctStatuses = distinctStatuses;
+        g.trangThaiTra = distinctStatuses.length === 1 ? distinctStatuses[0] : 'CHUA_TRA';
+
+        g.maPhieu = g.allocationsList.map((a: any) => a.maPhieu).join(', ');
+        g.soLuongCapPhat = g.soLuongDangDung;
+
+        return g;
+      });
+
+      // 4. Lọc tìm kiếm và trạng thái
+      result = groups.filter(g => {
+        const matchSearch = String(g.thietBi?.tenThietBi || g.tenThietBi || '').toLowerCase().includes(search.toLowerCase()) ||
+                            String(g.maThietBi || '').toLowerCase().includes(search.toLowerCase()) ||
+                            g.allocationsList.some((a: any) => String(a.maPhieu || '').toLowerCase().includes(search.toLowerCase()));
+        if (!matchSearch) return false;
+
+        if (filterStatus === 'CHUA_TRA') return g.allocationsList.some((a: any) => a.trangThaiTra === 'CHUA_TRA');
+        if (filterStatus === 'YEU_CAU_TRA') return g.allocationsList.some((a: any) => a.trangThaiTra === 'YEU_CAU_TRA');
+        if (filterStatus === 'DA_GIA_HAN') return g.allocationsList.some((a: any) => a.trangThaiTra === 'DA_GIA_HAN');
+
+        return true;
+      });
     } else {
       result = inventory.map(inv => ({
         ...inv,
@@ -298,6 +345,27 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
       default:
         return <Badge variant="outline">{status}</Badge>;
     }
+  };
+
+  const renderGroupStatusBadges = (group: any) => {
+    if (!group.allocationsList || group.allocationsList.length <= 1) {
+      return renderStatusBadge(group.trangThaiTra || 'CHUA_TRA');
+    }
+    const counts: Record<string, number> = {};
+    for (const a of group.allocationsList) {
+      const st = a.trangThaiTra || 'CHUA_TRA';
+      counts[st] = (counts[st] || 0) + 1;
+    }
+    return (
+      <div className="flex flex-col gap-1 items-center">
+        {Object.entries(counts).map(([st, cnt]) => (
+          <div key={st} className="flex items-center gap-1">
+            {renderStatusBadge(st)}
+            {cnt > 1 && <span className="text-[10px] text-muted-foreground font-semibold">x{cnt}</span>}
+          </div>
+        ))}
+      </div>
+    );
   };
 
   const openAdd = () => {
@@ -593,104 +661,238 @@ function StockView({ onRefresh }: { onRefresh: () => void }) {
             </thead>
             <tbody className="divide-y divide-border/50">
               {data.map(d => (
-                <tr 
-                  key={d.maTonKho} 
-                  className="hover:bg-muted/30 transition-colors cursor-pointer group"
-                  onClick={() => { setSelectedItem(d.thietBi); setDetailOpen(true); }}
-                >
-                  <td className="p-4">
-                    <div className="font-medium text-foreground group-hover:text-primary transition-colors">
-                      {d.thietBi?.tenThietBi || d.tenThietBi || 'Thiết bị không xác định'}
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-xs font-mono text-muted-foreground">{d.maThietBi}</span>
-                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-muted text-muted-foreground">
-                        {d.thietBi?.loaiThietBi === 'VAT_TU_TIEU_HAO' ? 'Tiêu hao' : 'Tái sử dụng'}
-                      </span>
-                    </div>
-                    {d.thietBi?.loaiThietBi === 'TAI_SU_DUNG' && (
-                      <div className="mt-1.5">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-6 text-[10px] px-2 py-0 border-primary/30 text-primary hover:bg-primary/10 gap-1 rounded-full font-normal shadow-none"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openInstancesModal(d.thietBi);
-                          }}
-                        >
-                          <QrCode className="w-3 h-3" /> Xem mã máy cá thể & QR
-                        </Button>
+                <React.Fragment key={d.maTonKho}>
+                  <tr 
+                    className="hover:bg-muted/30 transition-colors cursor-pointer group"
+                    onClick={() => { setSelectedItem(d.thietBi); setDetailOpen(true); }}
+                  >
+                    <td className="p-4">
+                      <div className="font-medium text-foreground group-hover:text-primary transition-colors">
+                        {d.thietBi?.tenThietBi || d.tenThietBi || 'Thiết bị không xác định'}
                       </div>
-                    )}
-                  </td>
-                  
-                  {isTrưởngKhoa ? (
-                    <>
-                      <td className="p-4">
-                        <span className="font-mono text-xs font-semibold text-primary bg-primary/10 px-2 py-1 rounded">
-                          {d.maPhieu}
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-xs font-mono text-muted-foreground">{d.maThietBi}</span>
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-muted text-muted-foreground">
+                          {d.thietBi?.loaiThietBi === 'VAT_TU_TIEU_HAO' ? 'Tiêu hao' : 'Tái sử dụng'}
                         </span>
-                      </td>
-                      <td className="p-4 text-center">
-                        <span className="inline-flex items-center justify-center min-w-[32px] px-2.5 py-1 rounded-md bg-primary/10 text-primary font-semibold text-xs">
-                          {d.soLuongCapPhat} {d.thietBi?.donViCoSo || d.donViTinh || ''}
-                        </span>
-                      </td>
-                      <td className="p-4 text-center text-muted-foreground text-xs">
-                        {d.ngayCapPhat ? new Date(d.ngayCapPhat).toLocaleDateString('vi-VN') : '—'}
-                      </td>
-                      <td className="p-4 text-center">
-                        <span className={`text-xs ${d.ngayDuKienTra && new Date(d.ngayDuKienTra) < new Date() ? 'text-destructive font-semibold' : 'text-muted-foreground'}`}>
-                          {d.ngayDuKienTra ? new Date(d.ngayDuKienTra).toLocaleDateString('vi-VN') : '—'}
-                        </span>
-                      </td>
-                      <td className="p-4 text-center">
-                        {renderStatusBadge(d.trangThaiTra)}
-                      </td>
-                      <td className="p-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5" onClick={e => e.stopPropagation()}>
+                      </div>
+                      {d.thietBi?.loaiThietBi === 'TAI_SU_DUNG' && (
+                        <div className="mt-1.5">
                           <Button
                             type="button"
-                            variant="ghost"
+                            variant="outline"
                             size="sm"
-                            className="h-7 text-xs text-muted-foreground hover:text-foreground"
-                            onClick={() => { setSelectedItem(d.thietBi); setDetailOpen(true); }}
+                            className="h-6 text-[10px] px-2 py-0 border-primary/30 text-primary hover:bg-primary/10 gap-1 rounded-full font-normal shadow-none"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openInstancesModal(d.thietBi);
+                            }}
                           >
-                            <Eye className="w-3.5 h-3.5 mr-1" /> Chi tiết
+                            <QrCode className="w-3 h-3" /> Xem mã máy cá thể & QR
                           </Button>
                         </div>
+                      )}
+                    </td>
+                    
+                    {isTrưởngKhoa ? (
+                      <>
+                        <td className="p-4">
+                          {d.soDotCap > 1 ? (
+                            <div className="flex flex-col gap-1" onClick={e => e.stopPropagation()}>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <Badge variant="outline" className="font-mono text-xs text-primary bg-primary/10 border-primary/30 font-semibold px-2 py-0.5">
+                                  {d.soDotCap} đợt cấp
+                                </Badge>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 text-[11px] px-2 py-0 text-primary hover:bg-primary/10 gap-1 rounded font-medium"
+                                  onClick={() => toggleExpand(d.maThietBi)}
+                                >
+                                  {expandedItems[d.maThietBi] ? (
+                                    <>
+                                      <ChevronUp className="w-3.5 h-3.5" /> Thu gọn
+                                    </>
+                                  ) : (
+                                    <>
+                                      <ChevronDown className="w-3.5 h-3.5" /> Xem {d.soDotCap} phiếu
+                                    </>
+                                  )}
+                                </Button>
+                              </div>
+                              <div className="text-[11px] text-muted-foreground font-mono truncate max-w-[200px]" title={d.allocationsList?.map((a: any) => a.maPhieu).join(', ')}>
+                                {d.allocationsList?.map((a: any) => a.maPhieu).join(', ')}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="font-mono text-xs font-semibold text-primary bg-primary/10 px-2 py-1 rounded">
+                              {d.allocationsList?.[0]?.maPhieu || d.maPhieu}
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-4 text-center">
+                          <div className="flex flex-col items-center">
+                            <span className="inline-flex items-center justify-center min-w-[32px] px-2.5 py-1 rounded-md bg-primary/10 text-primary font-bold text-xs">
+                              {d.soLuongDangDung} {d.thietBi?.donViCoSo || d.donViTinh || ''}
+                            </span>
+                            {d.soDotCap > 1 && (
+                              <span className="text-[10px] text-muted-foreground mt-0.5">({d.soDotCap} đợt)</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-4 text-center text-xs">
+                          {d.soDotCap > 1 ? (
+                            <div>
+                              <div className="font-medium text-foreground">
+                                {d.ngayCapGanNhat ? new Date(d.ngayCapGanNhat).toLocaleDateString('vi-VN') : '—'}
+                              </div>
+                              <div className="text-[10px] text-muted-foreground">Mới nhất</div>
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">
+                              {d.ngayCapPhat ? new Date(d.ngayCapPhat).toLocaleDateString('vi-VN') : '—'}
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-4 text-center">
+                          {d.soDotCap > 1 ? (
+                            <div className="text-xs">
+                              <span className={d.hanTraSomNhat && new Date(d.hanTraSomNhat) < new Date() ? 'text-destructive font-semibold' : 'text-muted-foreground'}>
+                                {d.hanTraSomNhat ? new Date(d.hanTraSomNhat).toLocaleDateString('vi-VN') : '—'}
+                              </span>
+                              {d.hanTraSomNhat && new Date(d.hanTraSomNhat) < new Date() && (
+                                <div className="text-[10px] text-destructive font-semibold">Có đợt quá hạn</div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className={`text-xs ${d.ngayDuKienTra && new Date(d.ngayDuKienTra) < new Date() ? 'text-destructive font-semibold' : 'text-muted-foreground'}`}>
+                              {d.ngayDuKienTra ? new Date(d.ngayDuKienTra).toLocaleDateString('vi-VN') : '—'}
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-4 text-center">
+                          {renderGroupStatusBadges(d)}
+                        </td>
+                        <td className="p-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5" onClick={e => e.stopPropagation()}>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-xs text-muted-foreground hover:text-foreground"
+                              onClick={() => { setSelectedItem(d.thietBi); setDetailOpen(true); }}
+                            >
+                              <Eye className="w-3.5 h-3.5 mr-1" /> Chi tiết
+                            </Button>
+                            {d.soDotCap > 1 && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs px-2 text-primary border-primary/30 hover:bg-primary/5"
+                                onClick={() => toggleExpand(d.maThietBi)}
+                                title={expandedItems[d.maThietBi] ? 'Thu gọn các đợt cấp' : 'Xem chi tiết các đợt cấp'}
+                              >
+                                {expandedItems[d.maThietBi] ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                              </Button>
+                            )}
+                          </div>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="p-4 text-center">
+                          <span className="inline-flex items-center justify-center min-w-[32px] px-2.5 py-1 rounded-md bg-primary/10 text-primary font-semibold">
+                            {d.soLuongKho} <span className="text-[10px] ml-1">{d.thietBi?.donViCoSo}</span>
+                          </span>
+                        </td>
+                        <td className="p-4 text-center">
+                          <span className="inline-flex items-center justify-center min-w-[32px] px-2.5 py-1 rounded-md bg-secondary/10 text-secondary-foreground font-semibold">
+                            {d.soLuongDangDung} <span className="text-[10px] ml-1">{d.thietBi?.donViCoSo}</span>
+                          </span>
+                        </td>
+                        <td className="p-4 text-center">
+                          <span className="inline-flex items-center justify-center min-w-[32px] px-2.5 py-1 rounded-md bg-warning/10 text-warning font-semibold">
+                            {d.soLuongHu} <span className="text-[10px] ml-1">{d.thietBi?.donViCoSo}</span>
+                          </span>
+                        </td>
+                        <td className="p-4 text-center">
+                          <span className="text-base font-bold text-foreground">
+                            {d.soLuongKho + d.soLuongDangDung + d.soLuongHu} <span className="text-xs font-normal text-muted-foreground">{d.thietBi?.donViCoSo}</span>
+                          </span>
+                        </td>
+                        <td className="p-4 text-right font-mono font-semibold text-primary">
+                          {d.donGia ? new Intl.NumberFormat('vi-VN').format(d.donGia * (d.soLuongKho + d.soLuongDangDung + d.soLuongHu)) + ' đ' : '-'}
+                        </td>
+                      </>
+                    )}
+                  </tr>
+
+                  {/* Dòng mở rộng chi tiết các đợt cấp phát khi thiết bị có nhiều phiếu cấp */}
+                  {isTrưởngKhoa && expandedItems[d.maThietBi] && d.soDotCap > 1 && (
+                    <tr className="bg-muted/15 border-b border-border/40">
+                      <td colSpan={7} className="p-4 bg-muted/10">
+                        <div className="bg-card rounded-xl border border-border/70 p-4 shadow-sm space-y-3">
+                          <div className="flex items-center justify-between pb-2 border-b">
+                            <div className="flex items-center gap-2">
+                              <Layers className="w-4 h-4 text-primary" />
+                              <span className="font-semibold text-xs text-foreground">
+                                Danh sách {d.soDotCap} đợt cấp phát của {d.thietBi?.tenThietBi}
+                              </span>
+                            </div>
+                            <span className="text-xs text-muted-foreground">
+                              Tổng số lượng: <strong className="text-primary font-bold">{d.soLuongDangDung} {d.thietBi?.donViCoSo}</strong>
+                            </span>
+                          </div>
+
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="text-muted-foreground border-b border-border/40 text-left">
+                                  <th className="p-2 pl-3 font-medium">Đợt</th>
+                                  <th className="p-2 font-medium">Mã phiếu cấp</th>
+                                  <th className="p-2 text-center font-medium">Số lượng</th>
+                                  <th className="p-2 text-center font-medium">Ngày cấp</th>
+                                  <th className="p-2 text-center font-medium">Hạn trả (Dự kiến)</th>
+                                  <th className="p-2 text-center font-medium">Trạng thái</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-border/30">
+                                {d.allocationsList.map((subAlloc: any, subIdx: number) => (
+                                  <tr key={subAlloc.maPhieu || subIdx} className="hover:bg-muted/40 transition-colors">
+                                    <td className="p-2 pl-3 font-semibold text-muted-foreground">
+                                      #{subIdx + 1}
+                                    </td>
+                                    <td className="p-2 font-mono font-semibold text-primary">
+                                      {subAlloc.maPhieu}
+                                    </td>
+                                    <td className="p-2 text-center">
+                                      <span className="px-2 py-0.5 rounded bg-primary/10 text-primary font-bold">
+                                        {subAlloc.soLuongCapPhat} {d.thietBi?.donViCoSo}
+                                      </span>
+                                    </td>
+                                    <td className="p-2 text-center text-muted-foreground">
+                                      {subAlloc.ngayCapPhat ? new Date(subAlloc.ngayCapPhat).toLocaleDateString('vi-VN') : '—'}
+                                    </td>
+                                    <td className="p-2 text-center">
+                                      <span className={subAlloc.ngayDuKienTra && new Date(subAlloc.ngayDuKienTra) < new Date() ? 'text-destructive font-semibold' : 'text-muted-foreground'}>
+                                        {subAlloc.ngayDuKienTra ? new Date(subAlloc.ngayDuKienTra).toLocaleDateString('vi-VN') : '—'}
+                                      </span>
+                                    </td>
+                                    <td className="p-2 text-center">
+                                      {renderStatusBadge(subAlloc.trangThaiTra)}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
                       </td>
-                    </>
-                  ) : (
-                    <>
-                      <td className="p-4 text-center">
-                        <span className="inline-flex items-center justify-center min-w-[32px] px-2 py-1 rounded-md bg-primary/10 text-primary font-semibold">
-                          {d.soLuongKho} <span className="text-[10px] ml-1">{d.thietBi?.donViCoSo}</span>
-                        </span>
-                      </td>
-                      <td className="p-4 text-center">
-                        <span className="inline-flex items-center justify-center min-w-[32px] px-2 py-1 rounded-md bg-secondary/10 text-secondary-foreground font-semibold">
-                          {d.soLuongDangDung} <span className="text-[10px] ml-1">{d.thietBi?.donViCoSo}</span>
-                        </span>
-                      </td>
-                      <td className="p-4 text-center">
-                        <span className="inline-flex items-center justify-center min-w-[32px] px-2 py-1 rounded-md bg-warning/10 text-warning font-semibold">
-                          {d.soLuongHu} <span className="text-[10px] ml-1">{d.thietBi?.donViCoSo}</span>
-                        </span>
-                      </td>
-                      <td className="p-4 text-center">
-                        <span className="text-base font-bold text-foreground">
-                          {d.soLuongKho + d.soLuongDangDung + d.soLuongHu} <span className="text-xs font-normal text-muted-foreground">{d.thietBi?.donViCoSo}</span>
-                        </span>
-                      </td>
-                      <td className="p-4 text-right font-mono font-semibold text-primary">
-                        {d.donGia ? new Intl.NumberFormat('vi-VN').format(d.donGia * (d.soLuongKho + d.soLuongDangDung + d.soLuongHu)) + ' đ' : '-'}
-                      </td>
-                    </>
+                    </tr>
                   )}
-                </tr>
+                </React.Fragment>
               ))}
             </tbody>
           </table>
