@@ -1227,16 +1227,17 @@ export default function TransfersPage() {
 
       {/* MODAL 1: ĐĂNG NHU CẦU CẦN MÁY */}
       <Dialog open={newNeedOpen} onOpenChange={setNewNeedOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="sm:max-w-xl w-full overflow-hidden">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-lg font-bold text-amber-900">
-              <Plus className="w-5 h-5 text-amber-600" />
+              <Plus className="w-5 h-5 text-amber-600 flex-shrink-0" />
               Đăng nhu cầu thiết bị y tế nội viện
             </DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-4 py-2 text-xs sm:text-sm">
+          <div className="space-y-4 py-2 text-xs sm:text-sm min-w-0">
             <div className="bg-amber-50 p-3 rounded-xl border border-amber-200 text-amber-900 text-xs">
+
               💡 Thông tin đăng tải sẽ được hiển thị ngay trên <strong>Bảng tin Nhu cầu Thiết bị</strong> để các khoa phòng kiểm tra thiết bị dư và chủ động hỗ trợ điều chuyển.
             </div>
 
@@ -1346,32 +1347,32 @@ export default function TransfersPage() {
 
       {/* MODAL 2: TẠO ĐỀ XUẤT ĐIỀU CHUYỂN */}
       <Dialog open={newTransferOpen} onOpenChange={setNewTransferOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="sm:max-w-xl w-full overflow-hidden">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-lg font-bold text-purple-900">
-              <ArrowLeftRight className="w-5 h-5 text-purple-600" />
+              <ArrowLeftRight className="w-5 h-5 text-purple-600 flex-shrink-0" />
               Đề xuất điều chuyển thiết bị sang khoa khác
             </DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-4 py-2 text-xs sm:text-sm">
+          <div className="space-y-4 py-2 text-xs sm:text-sm min-w-0">
             {transferSelectedNeedId && (
-              <div className="bg-purple-50 p-2.5 rounded-lg border border-purple-200 text-purple-900 text-xs flex items-center gap-2">
+              <div className="bg-purple-50 p-2.5 rounded-lg border border-purple-200 text-purple-900 text-xs flex items-center gap-2 overflow-hidden">
                 <Sparkles className="w-4 h-4 text-purple-600 flex-shrink-0" />
-                <span>Đáp ứng trực tiếp cho Nhu cầu nội viện: <strong>{transferSelectedNeedId}</strong></span>
+                <span className="truncate">Đáp ứng trực tiếp cho Nhu cầu nội viện: <strong>{transferSelectedNeedId}</strong></span>
               </div>
             )}
 
             <div>
               <Label className="mb-1 block font-semibold">Khoa bàn giao (Khoa gửi)</Label>
               <div className="flex items-center justify-between p-2.5 bg-muted/40 border border-border rounded-xl text-xs sm:text-sm mb-3">
-                <div className="flex items-center gap-2">
-                  <Building2 className="w-4 h-4 text-purple-600" />
-                  <span className="font-bold text-foreground">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Building2 className="w-4 h-4 text-purple-600 flex-shrink-0" />
+                  <span className="font-bold text-foreground truncate">
                     {departments.find(d => d.maKhoa === userDept)?.tenKhoa || userDept} ({userDept})
                   </span>
                 </div>
-                <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 text-[10px] font-medium">
+                <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 text-[10px] font-medium flex-shrink-0">
                   Khoa của bạn
                 </Badge>
               </div>
@@ -1411,19 +1412,18 @@ export default function TransfersPage() {
               />
             </div>
 
-
             <div>
               <Label className="mb-1 block font-semibold">Lý do & Mục đích điều chuyển <span className="text-destructive">*</span></Label>
               <Textarea
                 placeholder="Nhập lý do điều chuyển máy..."
                 value={transferReason}
                 onChange={e => setTransferReason(e.target.value)}
-                className="h-20 resize-none text-xs"
+                className="h-20 resize-none text-xs w-full"
               />
             </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="gap-2 sm:gap-0">
             <Button variant="ghost" onClick={() => setNewTransferOpen(false)}>Hủy</Button>
             <Button
               onClick={handleSubmitTransfer}
@@ -1436,6 +1436,7 @@ export default function TransfersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
 
       {/* MODAL 3: KIỂM TRA KỸ THUẬT & TIẾP NHẬN MÁY TẠI KHOA NHẬN */}
       <Dialog open={inspectModalOpen} onOpenChange={setInspectModalOpen}>

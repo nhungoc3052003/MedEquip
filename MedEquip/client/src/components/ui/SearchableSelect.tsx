@@ -48,13 +48,16 @@ export function SearchableSelect({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className={cn("w-full justify-between font-normal", className)}
+          className={cn("w-full justify-between font-normal min-w-0 overflow-hidden", className)}
         >
-          {value
-            ? options.find((option) => option.value === value)?.label
-            : placeholder}
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          <span className="truncate text-left flex-1 mr-2">
+            {value
+              ? options.find((option) => option.value === value)?.label
+              : placeholder}
+          </span>
+          <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
         </Button>
+
       </PopoverTrigger>
       <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
         <Command>
