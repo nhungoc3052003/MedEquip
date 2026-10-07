@@ -635,8 +635,8 @@ export async function confirmTransfer(req, res) {
     // 1. Cập nhật vị trí của cá thể thiết bị sang khoa nhận
     if (maCaThe && maKhoaNhan) {
       await conn.query(
-        "UPDATE ca_the_thiet_bi SET ma_khoa_hien_tai = ?, vi_tri_hien_tai = ?, trang_thai = 'DANG_SU_DUNG', ngay_cap_nhat = NOW() WHERE ma_ca_the = ?",
-        [maKhoaNhan, maKhoaNhan, maCaThe]
+        "UPDATE ca_the_thiet_bi SET ma_khoa_hien_tai = ?, vi_tri_hien_tai = 'KHOA_PHONG', trang_thai = 'DANG_SU_DUNG', ngay_cap_nhat = NOW() WHERE ma_ca_the = ?",
+        [maKhoaNhan, maCaThe]
       );
     }
 
