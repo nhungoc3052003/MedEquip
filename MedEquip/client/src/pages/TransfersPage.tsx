@@ -3,7 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { store } from '@/lib/store';
 import { fetchApi } from '@/services/api';
 import { 
-  apiGetNeeds, apiCreateNeed, apiCloseNeed, 
+  apiGetNeeds, apiCreateNeed, apiCloseNeed, apiReopenNeed,
   apiCreateRequest, apiApproveRequest, apiConfirmTransfer 
 } from '@/lib/apiSync';
 import { PhieuYeuCauCapPhat, NhuCauThietBi, ThietBi, Khoa } from '@/types';
@@ -24,8 +24,9 @@ import {
   ArrowLeftRight, Plus, Search, CheckCircle2, Clock, AlertTriangle,
   Building2, UserCheck, ShieldCheck, FileText, Printer, CheckCheck,
   Send, Eye, X, Activity, Sparkles, Filter, ChevronRight, Stethoscope,
-  Info, Check, Ban
+  Info, Check, Ban, History, RotateCcw
 } from 'lucide-react';
+
 
 const removeVietnameseTones = (str: any) => {
   if (!str) return '';
@@ -50,15 +51,29 @@ const removeVietnameseTones = (str: any) => {
 export default function TransfersPage() {
   const { user } = useAuth();
 
-  // Tab chính: 'bulletin' (Bảng tin nhu cầu) vs 'transfers' (Tiến độ & Biên bản)
-  const [activeTab, setActiveTab] = useState<'bulletin' | 'transfers'>('bulletin');
+  const isTruongKhoa = user?.vaiTro === 'TRUONG_KHOA';
+  const isTroLy = user?.vaiTro === 'TRO_LY';
+  const isQlKho = user?.vaiTro === 'QL_KHO' || user?.vaiTro === 'ADMIN';
 
-  // Dữ liệu Nhu cầu
+  // Xác định mã khoa của người dùng hiện tại
+  const userDept = user?.maKhoa || (
+    user?.email === 'khoanoi@benhvien.vn' || user?.hoTen?.includes('Nội') ? 'K-001' :
+    user?.hoTen?.includes('Ngoại') ? 'K-002' :
+    user?.hoTen?.includes('Sản') ? 'K-003' : 'K-001'
+  );
+
+  // Tab chính: 'bulletin' (Bảng tin nhu cầu) vs 'transfers' (Tiến độ & Biên bản) vs 'history' (Lịch sử phiếu)
+  const [activeTab, setActiveTab] = useState<'bulletin' | 'transfers' | 'history'>('bulletin');
+
+  // Dữ liệu Nhu cầu Bảng tin
   const [needs, setNeeds] = useState<NhuCauThietBi[]>([]);
   const [loadingNeeds, setLoadingNeeds] = useState(false);
   const [needSearch, setNeedSearch] = useState('');
-  const [needFilterStatus, setNeedFilterStatus] = useState<'ALL' | 'DANG_TIM_KIEM' | 'HOAN_THANH'>('ALL');
   const [needFilterPriority, setNeedFilterPriority] = useState<'ALL' | 'KHAN_CAP' | 'BINH_THUONG'>('ALL');
+
+  // Lịch sử phiếu nhu cầu của khoa
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyFilterStatus, setHistoryFilterStatus] = useState<'ALL' | 'DA_DONG' | 'HOAN_THANH'>('ALL');
 
   // Dữ liệu Phiếu Điều chuyển
   const [requests, setRequests] = useState<PhieuYeuCauCapPhat[]>([]);
@@ -73,11 +88,12 @@ export default function TransfersPage() {
 
   // Modal 1: Đăng nhu cầu cần máy
   const [newNeedOpen, setNewNeedOpen] = useState(false);
-  const [needDept, setNeedDept] = useState(user?.maKhoa || 'KNOI');
+  const [needDept, setNeedDept] = useState(userDept);
   const [needEquipment, setNeedEquipment] = useState('');
   const [needCustomName, setNeedCustomName] = useState('');
   const [needQty, setNeedQty] = useState(1);
   const [needPriority, setNeedPriority] = useState<'BINH_THUONG' | 'KHAN_CAP'>('BINH_THUONG');
+
   const [needReason, setNeedReason] = useState('');
 
   // Modal 2: Tạo đề xuất điều chuyển
@@ -142,16 +158,13 @@ export default function TransfersPage() {
     return () => window.removeEventListener('store_requests_changed', handleStoreChange);
   }, []);
 
-  // Tải danh sách cá thể máy khoa đang giữ khi mở modal điều chuyển
+  // Tải danh sách cá thể máy khoa đang giữ
   const fetchDeptInstances = async (deptCode: string) => {
     setLoadingDeptInstances(true);
     try {
       const res = await fetchApi<any>(`/instances/department/${deptCode}`);
-      if (res.success && Array.isArray(res.data)) {
-        setDeptInstances(res.data.filter((i: any) => i.trangThai === 'DANG_SU_DUNG'));
-      } else {
-        setDeptInstances([]);
-      }
+      const rawList = Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
+      setDeptInstances(rawList.filter((i: any) => i.trangThai === 'DANG_SU_DUNG' || !i.trangThai));
     } catch (e) {
       console.error(e);
       setDeptInstances([]);
@@ -160,12 +173,13 @@ export default function TransfersPage() {
     }
   };
 
+  // Tự động tải danh sách thiết bị của khoa ngay khi vào trang hoặc khi đổi khoa
   useEffect(() => {
-    if (newTransferOpen) {
-      const dept = user?.maKhoa || 'KNOI';
-      fetchDeptInstances(dept);
+    if (userDept) {
+      fetchDeptInstances(userDept);
     }
-  }, [newTransferOpen, user?.maKhoa]);
+  }, [userDept]);
+
 
   // Xử lý gửi Đăng Nhu cầu
   const handleCreateNeed = async () => {
@@ -183,7 +197,7 @@ export default function TransfersPage() {
     }
 
     try {
-      const targetDept = user?.maKhoa || needDept;
+      const targetDept = userDept;
       const res = await apiCreateNeed({
         maKhoaYeuCau: targetDept,
         maThietBi: needEquipment || undefined,
@@ -209,12 +223,15 @@ export default function TransfersPage() {
     }
   };
 
-  // Xử lý Đóng tin Nhu cầu
+  // Xử lý Dừng tìm kiếm Nhu cầu
   const handleCloseNeed = async (id: string) => {
     try {
       const res = await apiCloseNeed(id);
       if (res.success) {
-        toast({ title: 'Đã dừng tìm kiếm', description: 'Nhu cầu thiết bị đã được hủy và ngưng kêu gọi hỗ trợ.' });
+        toast({ 
+          title: 'Đã dừng tìm kiếm', 
+          description: 'Phiếu nhu cầu đã dừng tìm kiếm và được chuyển vào mục "Lịch sử phiếu".' 
+        });
         loadNeeds();
       }
     } catch (e: any) {
@@ -222,19 +239,57 @@ export default function TransfersPage() {
     }
   };
 
+  // Xử lý Mở lại / Tìm kiếm lại Nhu cầu từ Lịch sử
+  const handleReopenNeed = async (id: string) => {
+    try {
+      const res = await apiReopenNeed(id);
+      if (res.success) {
+        toast({ 
+          title: 'Đã mở lại tìm kiếm', 
+          description: 'Phiếu nhu cầu đã được đưa trở lại Bảng tin để tiếp tục kêu gọi hỗ trợ.' 
+        });
+        loadNeeds();
+      } else {
+        toast({ title: 'Lỗi', description: res.message || 'Không thể mở lại nhu cầu.', variant: 'destructive' });
+      }
+    } catch (e: any) {
+      toast({ title: 'Lỗi', description: e.message, variant: 'destructive' });
+    }
+  };
+
+
   // Mở modal điều chuyển từ một tin nhu cầu
   const handleSupportFromNeed = (need: NhuCauThietBi) => {
     setTransferSelectedNeedId(need.maNhuCau);
     setTransferDestDept(need.maKhoaYeuCau);
-    setTransferReason(`Hỗ trợ đáp ứng nhu cầu [${need.maNhuCau}] của khoa: ${need.tenThietBi}.`);
+    setTransferReason(`Hỗ trợ đáp ứng nhu cầu [${need.maNhuCau}] của ${need.tenKhoaYeuCau || need.maKhoaYeuCau}: ${need.tenThietBi}.`);
+
+    // Tự động tìm và chọn máy cá thể phù hợp của khoa mình nếu có sẵn
+    const matching = deptInstances.filter(i => {
+      if (need.maThietBi && i.maThietBi === need.maThietBi) return true;
+      if (need.tenThietBi && i.tenThietBi) {
+        const nName = need.tenThietBi.toLowerCase();
+        const iName = i.tenThietBi.toLowerCase();
+        return nName.includes(iName) || iName.includes(nName);
+      }
+      return false;
+    });
+
+    if (matching.length > 0) {
+      setTransferInstance(matching[0].maCaThe);
+    } else {
+      setTransferInstance('');
+    }
+
     setNewTransferOpen(true);
   };
+
 
   // Xử lý gửi Đề xuất Điều chuyển
   const handleSubmitTransfer = async () => {
     if (!transferInstance) return toast({ title: 'Thiếu thông tin', description: 'Vui lòng chọn máy cá thể cần điều chuyển.', variant: 'destructive' });
     if (!transferDestDept) return toast({ title: 'Thiếu thông tin', description: 'Vui lòng chọn khoa tiếp nhận.', variant: 'destructive' });
-    const currentDept = user?.maKhoa || 'KNOI';
+    const currentDept = userDept;
     if (transferDestDept === currentDept) return toast({ title: 'Không hợp lệ', description: 'Khoa tiếp nhận phải khác khoa hiện tại.', variant: 'destructive' });
     if (!transferReason.trim()) return toast({ title: 'Thiếu thông tin', description: 'Vui lòng nhập lý do điều chuyển thiết bị.', variant: 'destructive' });
 
@@ -406,18 +461,44 @@ export default function TransfersPage() {
     toast({ title: 'Xuất PDF thành công', description: 'Biên bản điều chuyển thiết bị đã được tải về máy.' });
   };
 
-  // Filtered Needs
-  const filteredNeeds = useMemo(() => {
-    return needs.filter(n => {
+  // BẢNG TIN: Chỉ lấy các nhu cầu đang tìm kiếm (DANG_TIM_KIEM) trên toàn viện.
+  // Phiếu đã dừng tìm kiếm của khoa khác hoặc của khoa mình sẽ KHÔNG xuất hiện trên Bảng tin.
+  const bulletinNeeds = useMemo(() => {
+
+    return needs.filter(n => n.trangThai === 'DANG_TIM_KIEM');
+  }, [needs]);
+
+  const filteredBulletinNeeds = useMemo(() => {
+    return bulletinNeeds.filter(n => {
       const matchSearch = n.tenThietBi.toLowerCase().includes(needSearch.toLowerCase()) ||
         n.maNhuCau.toLowerCase().includes(needSearch.toLowerCase()) ||
         (n.lyDo && n.lyDo.toLowerCase().includes(needSearch.toLowerCase())) ||
         (n.tenKhoaYeuCau && n.tenKhoaYeuCau.toLowerCase().includes(needSearch.toLowerCase()));
-      const matchStatus = needFilterStatus === 'ALL' || n.trangThai === needFilterStatus;
       const matchPriority = needFilterPriority === 'ALL' || n.mucDoUuTien === needFilterPriority;
-      return matchSearch && matchStatus && matchPriority;
+      return matchSearch && matchPriority;
     });
-  }, [needs, needSearch, needFilterStatus, needFilterPriority]);
+  }, [bulletinNeeds, needSearch, needFilterPriority]);
+
+  // LỊCH SỬ PHIẾU: Các phiếu của khoa đã dừng tìm kiếm (DA_DONG) hoặc đã hoàn thành (HOAN_THANH).
+  // (Nếu là QL Kho / Admin thì xem được lịch sử của toàn bộ các khoa).
+  const historyNeeds = useMemo(() => {
+    return needs.filter(n => {
+      const isTargetDept = isQlKho ? true : (n.maKhoaYeuCau === userDept);
+      const isPastStatus = n.trangThai === 'DA_DONG' || n.trangThai === 'HOAN_THANH';
+      return isTargetDept && isPastStatus;
+    });
+  }, [needs, userDept, isQlKho]);
+
+  const filteredHistoryNeeds = useMemo(() => {
+    return historyNeeds.filter(n => {
+      const matchSearch = n.tenThietBi.toLowerCase().includes(historySearch.toLowerCase()) ||
+        n.maNhuCau.toLowerCase().includes(historySearch.toLowerCase()) ||
+        (n.lyDo && n.lyDo.toLowerCase().includes(historySearch.toLowerCase())) ||
+        (n.tenKhoaYeuCau && n.tenKhoaYeuCau.toLowerCase().includes(historySearch.toLowerCase()));
+      const matchStatus = historyFilterStatus === 'ALL' || n.trangThai === historyFilterStatus;
+      return matchSearch && matchStatus;
+    });
+  }, [historyNeeds, historySearch, historyFilterStatus]);
 
   // Filtered Transfers
   const filteredTransfers = useMemo(() => {
@@ -441,9 +522,6 @@ export default function TransfersPage() {
     return { searchingCount, urgentCount, completedTransfers, pendingInspection };
   }, [needs, requests]);
 
-  const isTruongKhoa = user?.vaiTro === 'TRUONG_KHOA';
-  const isTroLy = user?.vaiTro === 'TRO_LY';
-  const isQlKho = user?.vaiTro === 'QL_KHO' || user?.vaiTro === 'ADMIN';
 
   return (
     <div className="p-4 sm:p-6 space-y-6 max-w-7xl mx-auto">
@@ -544,7 +622,7 @@ export default function TransfersPage() {
           )}
         >
           <Sparkles className="w-4 h-4" />
-          Bảng tin Nhu cầu Thiết bị ({needs.length})
+          Bảng tin Nhu cầu Thiết bị ({bulletinNeeds.length})
         </button>
 
         <button
@@ -559,9 +637,22 @@ export default function TransfersPage() {
           <ArrowLeftRight className="w-4 h-4" />
           Tiến độ Điều chuyển & Biên bản ({requests.length})
         </button>
+
+        <button
+          onClick={() => setActiveTab('history')}
+          className={cn(
+            "pb-3 text-sm font-bold flex items-center gap-2 border-b-2 transition-all",
+            activeTab === 'history'
+              ? "border-purple-600 text-purple-700 dark:text-purple-400"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          )}
+        >
+          <History className="w-4 h-4" />
+          Lịch sử phiếu ({historyNeeds.length})
+        </button>
       </div>
 
-      {/* TAB 1: BẢNG TIN NHU CẦU THIẾT BỊ NỘI VIỆN */}
+      {/* TAB 1: BẢNG TIN NHU CẦU THIẾT BỊ NỘI VIỆN (CHỈ HIỆN CÁC PHIẾU ĐANG TÌM KIẾM) */}
       {activeTab === 'bulletin' && (
         <div className="space-y-4">
           {/* Thanh tìm kiếm & lọc */}
@@ -579,27 +670,27 @@ export default function TransfersPage() {
             <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
               <Button
                 size="sm"
-                variant={needFilterStatus === 'ALL' ? 'default' : 'outline'}
-                onClick={() => setNeedFilterStatus('ALL')}
-                className="h-8 text-xs"
+                variant={needFilterPriority === 'ALL' ? 'default' : 'outline'}
+                onClick={() => setNeedFilterPriority('ALL')}
+                className="h-8 text-xs font-semibold"
               >
-                Tất cả ({needs.length})
+                Tất cả ({bulletinNeeds.length})
               </Button>
               <Button
                 size="sm"
-                variant={needFilterStatus === 'DANG_TIM_KIEM' ? 'default' : 'outline'}
-                onClick={() => setNeedFilterStatus('DANG_TIM_KIEM')}
+                variant={needFilterPriority === 'BINH_THUONG' ? 'default' : 'outline'}
+                onClick={() => setNeedFilterPriority(needFilterPriority === 'BINH_THUONG' ? 'ALL' : 'BINH_THUONG')}
                 className="h-8 text-xs text-blue-600 border-blue-200"
               >
-                Đang tìm kiếm ({needs.filter(n => n.trangThai === 'DANG_TIM_KIEM').length})
+                Bình thường ({bulletinNeeds.filter(n => n.mucDoUuTien === 'BINH_THUONG').length})
               </Button>
               <Button
                 size="sm"
                 variant={needFilterPriority === 'KHAN_CAP' ? 'destructive' : 'outline'}
                 onClick={() => setNeedFilterPriority(needFilterPriority === 'KHAN_CAP' ? 'ALL' : 'KHAN_CAP')}
-                className="h-8 text-xs gap-1"
+                className="h-8 text-xs gap-1 font-bold"
               >
-                🚨 Khẩn cấp ({needs.filter(n => n.mucDoUuTien === 'KHAN_CAP').length})
+                🚨 Khẩn cấp ({bulletinNeeds.filter(n => n.mucDoUuTien === 'KHAN_CAP').length})
               </Button>
             </div>
           </div>
@@ -607,12 +698,12 @@ export default function TransfersPage() {
           {/* Danh sách thẻ Nhu cầu */}
           {loadingNeeds ? (
             <div className="py-12 text-center text-sm text-muted-foreground">Đang tải bảng tin nhu cầu...</div>
-          ) : filteredNeeds.length === 0 ? (
+          ) : filteredBulletinNeeds.length === 0 ? (
             <div className="py-16 text-center bg-card rounded-2xl border border-dashed p-8">
               <div className="w-12 h-12 rounded-full bg-purple-50 text-purple-600 flex items-center justify-center mx-auto mb-3">
                 <Sparkles className="w-6 h-6" />
               </div>
-              <h3 className="font-bold text-base text-foreground mb-1">Hiện không có tin nhu cầu nào</h3>
+              <h3 className="font-bold text-base text-foreground mb-1">Hiện không có nhu cầu nào đang tìm kiếm</h3>
               <p className="text-xs text-muted-foreground max-w-md mx-auto mb-4">
                 Nếu khoa của bạn đang thiếu máy móc để điều trị bệnh nhân, hãy bấm "Đăng nhu cầu cần máy" để các khoa bạn hỗ trợ.
               </p>
@@ -623,11 +714,9 @@ export default function TransfersPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredNeeds.map(need => {
-                const isMyDept = (user?.maKhoa && need.maKhoaYeuCau === user.maKhoa);
+              {filteredBulletinNeeds.map(need => {
+                const isMyDept = (need.maKhoaYeuCau === userDept);
                 const isUrgent = need.mucDoUuTien === 'KHAN_CAP';
-                const isCompleted = need.trangThai === 'HOAN_THANH';
-                const isClosed = need.trangThai === 'DA_DONG';
                 const progressPct = Math.min(100, Math.round(((need.soLuongDaDapUng || 0) / need.soLuongCan) * 100));
 
                 return (
@@ -635,8 +724,7 @@ export default function TransfersPage() {
                     key={need.maNhuCau}
                     className={cn(
                       "bg-card rounded-2xl border p-5 shadow-xs flex flex-col justify-between transition-all hover:shadow-md relative overflow-hidden",
-                      isUrgent && "border-rose-300 dark:border-rose-900/60 bg-gradient-to-br from-rose-50/30 to-card",
-                      isCompleted && "opacity-80 border-emerald-200"
+                      isUrgent && "border-rose-300 dark:border-rose-900/60 bg-gradient-to-br from-rose-50/30 to-card"
                     )}
                   >
                     {isUrgent && (
@@ -662,15 +750,15 @@ export default function TransfersPage() {
                       </h3>
 
                       {/* Lý do */}
-                      <p className="text-xs text-muted-foreground line-clamp-2 mb-4 bg-muted/30 p-2 rounded-lg italic">
+                      <p className="text-xs text-muted-foreground line-clamp-2 mb-3 bg-muted/30 p-2 rounded-lg italic">
                         "{need.lyDo || 'Cần bổ sung máy phục vụ bệnh nhân theo chỉ định khoa.'}"
                       </p>
 
-                      {/* Tiến độ đáp ứng */}
-                      <div className="space-y-1.5 mb-4 bg-card/80 p-3 rounded-xl border border-border/60">
-                        <div className="flex justify-between text-xs font-medium">
-                          <span>Số lượng cần: <strong className="text-foreground">{need.soLuongCan} máy</strong></span>
-                          <span>Đã có: <strong className="text-emerald-600">{need.soLuongDaDapUng || 0}</strong></span>
+                      {/* Tiến độ đáp ứng của nhu cầu */}
+                      <div className="space-y-1.5 mb-3 bg-card/80 p-2.5 rounded-xl border border-border/60 text-xs">
+                        <div className="flex justify-between font-medium">
+                          <span className="text-muted-foreground">Nhu cầu cần: <strong className="text-foreground">{need.soLuongCan} máy</strong></span>
+                          <span>Khoa đã nhận: <strong className="text-purple-700 font-bold">{need.soLuongDaDapUng || 0} / {need.soLuongCan}</strong></span>
                         </div>
                         <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
                           <div
@@ -682,6 +770,46 @@ export default function TransfersPage() {
                           />
                         </div>
                       </div>
+
+                      {/* Đối chiếu tồn kho thực tế của Khoa bạn đối với nhu cầu này */}
+                      {!isMyDept && (() => {
+                        const matchingInstances = deptInstances.filter(i => {
+                          if (need.maThietBi && i.maThietBi === need.maThietBi) return true;
+                          if (need.tenThietBi && i.tenThietBi) {
+                            const nName = need.tenThietBi.toLowerCase();
+                            const iName = i.tenThietBi.toLowerCase();
+                            return nName.includes(iName) || iName.includes(nName);
+                          }
+                          return false;
+                        });
+                        const myCount = matchingInstances.length;
+
+                        return (
+                          <div className={cn(
+                            "mb-3 p-2.5 rounded-xl border text-xs flex items-center justify-between transition-all",
+                            myCount > 0
+                              ? "bg-emerald-50/90 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/60 text-emerald-900 dark:text-emerald-300"
+                              : "bg-slate-50 dark:bg-muted/40 border-slate-200/80 dark:border-border text-muted-foreground"
+                          )}>
+                            <div className="flex items-center gap-2">
+                              <span className={cn(
+                                "w-2.5 h-2.5 rounded-full flex-shrink-0",
+                                myCount > 0 ? "bg-emerald-500 animate-pulse" : "bg-slate-300 dark:bg-slate-600"
+                              )} />
+                              <span className="font-medium">
+                                Khoa bạn đang có: <strong className={myCount > 0 ? "text-emerald-700 dark:text-emerald-400 font-bold" : "text-foreground"}>{myCount} máy</strong>
+                              </span>
+                            </div>
+                            {myCount > 0 ? (
+                              <Badge variant="outline" className="bg-emerald-100 text-emerald-800 border-emerald-300 text-[10px] font-bold px-2 py-0.5">
+                                Có thể hỗ trợ
+                              </Badge>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground italic">Không có máy dư</span>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {/* Footer & Actions */}
@@ -691,54 +819,59 @@ export default function TransfersPage() {
                       </div>
 
                       <div className="flex items-center gap-1.5">
-                        {/* Nút hủy tìm kiếm */}
-                        {(isMyDept || isQlKho) && need.trangThai === 'DANG_TIM_KIEM' && (
+                        {/* Nút hủy / dừng tìm kiếm đối với tin của khoa mình */}
+                        {(isMyDept || isQlKho) && (
                           <Button
                             size="sm"
                             variant="outline"
                             onClick={() => handleCloseNeed(need.maNhuCau)}
                             className="h-8 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 border-rose-200 gap-1 px-2.5 font-medium"
-                            title="Hủy tìm kiếm và ngưng kêu gọi hỗ trợ thiết bị này"
+                            title="Dừng tìm kiếm và lưu vào Lịch sử phiếu"
                           >
                             <X className="w-3.5 h-3.5" />
-                            Hủy tìm kiếm
+                            Dừng tìm kiếm
                           </Button>
                         )}
 
-                        {/* Nút hỗ trợ chuyển máy */}
-                        {need.trangThai === 'DANG_TIM_KIEM' && !isMyDept && (
-                          <Button
-                            size="sm"
-                            onClick={() => handleSupportFromNeed(need)}
-                            className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold gap-1 h-8 rounded-lg shadow-xs"
-                          >
-                            <ArrowLeftRight className="w-3.5 h-3.5" />
-                            Hỗ trợ chuyển máy
-                          </Button>
-                        )}
+                        {/* Nút hỗ trợ chuyển máy đối với tin của khoa khác */}
+                        {!isMyDept && (() => {
+                          const matchingCount = deptInstances.filter(i => {
+                            if (need.maThietBi && i.maThietBi === need.maThietBi) return true;
+                            if (need.tenThietBi && i.tenThietBi) {
+                              const nName = need.tenThietBi.toLowerCase();
+                              const iName = i.tenThietBi.toLowerCase();
+                              return nName.includes(iName) || iName.includes(nName);
+                            }
+                            return false;
+                          }).length;
 
-                        {isCompleted && (
-                          <Badge variant="outline" className="text-emerald-700 bg-emerald-50 border-emerald-200 text-xs gap-1 py-1 px-2">
-                            <Check className="w-3 h-3 text-emerald-600" />
-                            Đã đáp ứng đủ máy
-                          </Badge>
-                        )}
-
-                        {isClosed && (
-                          <Badge variant="outline" className="text-slate-500 bg-slate-100 border-slate-200 text-xs gap-1 py-1 px-2">
-                            <Ban className="w-3 h-3 text-slate-400" />
-                            Đã dừng tìm kiếm
-                          </Badge>
-                        )}
+                          return (
+                            <Button
+                              size="sm"
+                              onClick={() => handleSupportFromNeed(need)}
+                              className={cn(
+                                "text-xs font-bold gap-1.5 h-8 rounded-lg shadow-xs transition-all",
+                                matchingCount > 0
+                                  ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                                  : "bg-purple-600 hover:bg-purple-700 text-white"
+                              )}
+                            >
+                              <ArrowLeftRight className="w-3.5 h-3.5" />
+                              {matchingCount > 0 ? `Hỗ trợ chuyển máy (${matchingCount})` : 'Hỗ trợ chuyển máy'}
+                            </Button>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>
                 );
+
               })}
             </div>
           )}
         </div>
       )}
+
 
       {/* TAB 2: TIẾN ĐỘ ĐIỀU CHUYỂN & BIÊN BẢN */}
       {activeTab === 'transfers' && (
@@ -937,6 +1070,161 @@ export default function TransfersPage() {
         </div>
       )}
 
+      {/* TAB 3: LỊCH SỬ PHIẾU NHU CẦU CỦA KHOA */}
+      {activeTab === 'history' && (
+        <div className="space-y-4">
+          {/* Thanh tìm kiếm & Lọc trạng thái */}
+          <div className="flex flex-col sm:flex-row gap-3 items-center justify-between bg-card p-3.5 rounded-xl border shadow-xs">
+            <div className="relative w-full sm:w-80">
+              <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+              <Input
+                placeholder="Tìm mã phiếu, tên thiết bị, lý do..."
+                value={historySearch}
+                onChange={e => setHistorySearch(e.target.value)}
+                className="pl-9 h-9 text-xs"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+              <Button
+                size="sm"
+                variant={historyFilterStatus === 'ALL' ? 'default' : 'outline'}
+                onClick={() => setHistoryFilterStatus('ALL')}
+                className="h-8 text-xs font-semibold"
+              >
+                Tất cả ({historyNeeds.length})
+              </Button>
+              <Button
+                size="sm"
+                variant={historyFilterStatus === 'DA_DONG' ? 'default' : 'outline'}
+                onClick={() => setHistoryFilterStatus('DA_DONG')}
+                className="h-8 text-xs text-amber-700 border-amber-200 font-medium"
+              >
+                Đã dừng tìm kiếm ({historyNeeds.filter(n => n.trangThai === 'DA_DONG').length})
+              </Button>
+              <Button
+                size="sm"
+                variant={historyFilterStatus === 'HOAN_THANH' ? 'default' : 'outline'}
+                onClick={() => setHistoryFilterStatus('HOAN_THANH')}
+                className="h-8 text-xs text-emerald-700 border-emerald-200 font-medium"
+              >
+                Đã đáp ứng đủ máy ({historyNeeds.filter(n => n.trangThai === 'HOAN_THANH').length})
+              </Button>
+            </div>
+          </div>
+
+          {/* Danh sách thẻ Lịch sử */}
+          {loadingNeeds ? (
+            <div className="py-12 text-center text-sm text-muted-foreground">Đang tải lịch sử phiếu...</div>
+          ) : filteredHistoryNeeds.length === 0 ? (
+            <div className="py-16 text-center bg-card rounded-2xl border border-dashed p-8">
+              <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center mx-auto mb-3">
+                <History className="w-6 h-6" />
+              </div>
+              <h3 className="font-bold text-base text-foreground mb-1">Chưa có phiếu nhu cầu nào trong lịch sử</h3>
+              <p className="text-xs text-muted-foreground max-w-md mx-auto">
+                Các phiếu nhu cầu sau khi khoa dừng tìm kiếm hoặc đã nhận đủ máy sẽ được lưu trữ tự động tại đây để tra cứu và theo dõi.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredHistoryNeeds.map(need => {
+                const isMyDept = (need.maKhoaYeuCau === userDept);
+                const isCompleted = need.trangThai === 'HOAN_THANH';
+                const isClosed = need.trangThai === 'DA_DONG';
+
+                return (
+                  <div
+                    key={need.maNhuCau}
+                    className="bg-card rounded-2xl border p-5 shadow-xs flex flex-col justify-between transition-all hover:shadow-md relative overflow-hidden bg-slate-50/20 dark:bg-card"
+                  >
+                    <div>
+                      {/* Header Card */}
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-mono font-bold text-muted-foreground">{need.maNhuCau}</span>
+                          <span className="text-[11px] text-muted-foreground">•</span>
+                          <span className="text-xs font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md">
+                            {need.tenKhoaYeuCau || need.maKhoaYeuCau}
+                          </span>
+                        </div>
+
+                        {isClosed ? (
+                          <Badge variant="outline" className="text-amber-700 bg-amber-50 border-amber-200 text-xs font-semibold gap-1 py-0.5 px-2">
+                            <Ban className="w-3 h-3 text-amber-500" />
+                            Đã dừng tìm kiếm
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-emerald-700 bg-emerald-50 border-emerald-200 text-xs font-semibold gap-1 py-0.5 px-2">
+                            <Check className="w-3 h-3 text-emerald-500" />
+                            Đã hoàn thành
+                          </Badge>
+                        )}
+                      </div>
+
+                      {/* Tên thiết bị */}
+                      <h3 className="font-bold text-base text-foreground mb-1 line-clamp-1 flex items-center gap-1.5">
+                        <Stethoscope className="w-4 h-4 text-purple-600 flex-shrink-0" />
+                        {need.tenThietBi}
+                      </h3>
+
+                      {/* Lý do */}
+                      <p className="text-xs text-muted-foreground line-clamp-2 mb-4 bg-muted/30 p-2 rounded-lg italic">
+                        "{need.lyDo || 'Không có ghi chú thêm.'}"
+                      </p>
+
+                      {/* Thông tin số lượng & ngày tạo */}
+                      <div className="space-y-1.5 mb-4 bg-card/80 p-3 rounded-xl border border-border/60 text-xs">
+                        <div className="flex justify-between font-medium">
+                          <span className="text-muted-foreground">Số lượng cần:</span>
+                          <strong className="text-foreground">{need.soLuongCan} máy</strong>
+                        </div>
+                        <div className="flex justify-between font-medium">
+                          <span className="text-muted-foreground">Đã đáp ứng:</span>
+                          <strong className="text-emerald-600">{need.soLuongDaDapUng || 0} máy</strong>
+                        </div>
+                        <div className="flex justify-between font-medium text-[11px] pt-1 border-t border-border/40">
+                          <span className="text-muted-foreground">Ngày đăng tin:</span>
+                          <span className="text-foreground">{new Date(need.ngayTao).toLocaleDateString('vi-VN')}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Footer & Actions */}
+                    <div className="pt-3 border-t flex items-center justify-between gap-2 mt-2">
+                      <div className="text-[11px] text-muted-foreground">
+                        Đăng bởi: <strong>{need.tenNguoiDang || need.maNguoiDang}</strong>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        {(isMyDept || isQlKho) && isClosed && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleReopenNeed(need.maNhuCau)}
+                            className="h-8 text-xs text-purple-700 hover:text-purple-800 hover:bg-purple-50 border-purple-200 gap-1.5 px-3 font-semibold shadow-xs"
+                            title="Đưa phiếu này trở lại Bảng tin để tiếp tục kêu gọi hỗ trợ"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5 text-purple-600" />
+                            Tiếp tục tìm kiếm lại
+                          </Button>
+                        )}
+                        {isCompleted && (
+                          <Badge variant="outline" className="text-muted-foreground bg-muted/30 border-border text-[11px] py-0.5 px-2">
+                            Lưu trữ hồ sơ
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+
       {/* MODAL 1: ĐĂNG NHU CẦU CẦN MÁY */}
       <Dialog open={newNeedOpen} onOpenChange={setNewNeedOpen}>
         <DialogContent className="max-w-lg">
@@ -954,12 +1242,12 @@ export default function TransfersPage() {
 
             <div>
               <Label className="mb-1 block font-semibold">Khoa yêu cầu <span className="text-destructive">*</span></Label>
-              {user?.maKhoa ? (
+              {userDept ? (
                 <div className="flex items-center justify-between p-3 bg-muted/40 border border-border rounded-xl text-xs sm:text-sm">
                   <div className="flex items-center gap-2">
                     <Building2 className="w-4 h-4 text-purple-600" />
                     <span className="font-bold text-foreground">
-                      {departments.find(d => d.maKhoa === user.maKhoa)?.tenKhoa || user.maKhoa} ({user.maKhoa})
+                      {departments.find(d => d.maKhoa === userDept)?.tenKhoa || userDept} ({userDept})
                     </span>
                   </div>
                   <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 text-[10px] font-medium">
@@ -1080,7 +1368,7 @@ export default function TransfersPage() {
                 <div className="flex items-center gap-2">
                   <Building2 className="w-4 h-4 text-purple-600" />
                   <span className="font-bold text-foreground">
-                    {departments.find(d => d.maKhoa === (user?.maKhoa || 'KNOI'))?.tenKhoa || (user?.maKhoa || 'KNOI')} ({user?.maKhoa || 'KNOI'})
+                    {departments.find(d => d.maKhoa === userDept)?.tenKhoa || userDept} ({userDept})
                   </span>
                 </div>
                 <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 text-[10px] font-medium">
@@ -1113,7 +1401,7 @@ export default function TransfersPage() {
             <div>
               <Label className="mb-1 block font-semibold">Khoa tiếp nhận thiết bị <span className="text-destructive">*</span></Label>
               <SearchableSelect
-                options={departments.filter(d => d.maKhoa !== (user?.maKhoa || 'KNOI')).map(d => ({
+                options={departments.filter(d => d.maKhoa !== userDept).map(d => ({
                   value: d.maKhoa,
                   label: `${d.tenKhoa} (${d.maKhoa})`
                 }))}
@@ -1122,6 +1410,7 @@ export default function TransfersPage() {
                 placeholder="Chọn khoa tiếp nhận..."
               />
             </div>
+
 
             <div>
               <Label className="mb-1 block font-semibold">Lý do & Mục đích điều chuyển <span className="text-destructive">*</span></Label>

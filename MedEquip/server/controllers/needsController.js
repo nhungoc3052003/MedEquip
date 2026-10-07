@@ -88,3 +88,15 @@ export async function closeNeed(req, res) {
     res.status(500).json({ success: false, message: "Lỗi máy chủ khi đóng nhu cầu thiết bị." });
   }
 }
+
+export async function reopenNeed(req, res) {
+  try {
+    const { id } = req.params;
+    await pool.query("UPDATE nhu_cau_thiet_bi SET trang_thai = 'DANG_TIM_KIEM' WHERE ma_nhu_cau = ?", [id]);
+    res.json({ success: true, message: "Đã kích hoạt tìm kiếm lại nhu cầu thiết bị." });
+  } catch (err) {
+    console.error("Error reopening need:", err);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ khi mở lại nhu cầu thiết bị." });
+  }
+}
+

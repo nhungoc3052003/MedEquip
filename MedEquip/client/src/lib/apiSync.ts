@@ -736,6 +736,14 @@ export async function apiCloseNeed(id: string) {
   return fetchApi<any>(`/needs/${id}/close`, { method: 'PUT' });
 }
 
+export async function apiReopenNeed(id: string) {
+  if (isMockMode()) {
+    return { success: true };
+  }
+  return fetchApi<any>(`/needs/${id}/reopen`, { method: 'PUT' });
+}
+
+
 export async function apiConfirmTransfer(maPhieu: string, data: { checklist: any; ghiChu?: string }) {
   if (isMockMode()) {
     const requests = store.getRequests();
