@@ -362,7 +362,11 @@ export default function TransfersPage() {
       khuKhuan: true,
       ngoaiQuan: true,
     });
-    setInspectorName(user?.hoTen || '');
+    const receiverAssistant = users.find(u => u.maKhoa === req.maKhoaNhan && u.vaiTro === 'TRO_LY');
+    const defaultInspector = (user?.vaiTro === 'TRO_LY' && user?.hoTen) 
+      ? user.hoTen 
+      : (receiverAssistant?.hoTen || (user?.hoTen && !user.hoTen.startsWith('ND-') ? user.hoTen : ''));
+    setInspectorName(defaultInspector || (req.maKhoaNhan === 'K-002' ? 'Trợ lý Khoa Ngoại' : 'Trợ lý khoa'));
     setInspectNotes('');
     setInspectModalOpen(true);
   };
@@ -448,37 +452,62 @@ export default function TransfersPage() {
     return idOrName;
   };
 
-  // Helper lấy tên người đại diện bên giao
+  // Helper lấy tên trợ lý / đại diện bên giao (không dùng mã nhân viên)
   const getSenderPersonName = (req: PhieuYeuCauCapPhat) => {
+    // 1. Nếu có mã người yêu cầu, đối chiếu sang họ tên (ví dụ: ND-007 -> Trợ lý Khoa Nội)
     if (req.maNguoiYeuCau) {
       const name = getUserName(req.maNguoiYeuCau);
-      if (name) return name;
+      if (name && !name.startsWith('ND-')) return name;
     }
+    // 2. Ưu tiên tìm Trợ lý của khoa giao
     if (req.maKhoa) {
       const senderUsers = users.filter(u => u.maKhoa === req.maKhoa);
-      const senderLead = senderUsers.find(u => u.vaiTro === 'TRUONG_KHOA') || senderUsers[0];
-      if (senderLead) return senderLead.hoTen;
-      const dept = departments.find(d => d.maKhoa === req.maKhoa);
-      if (dept) return `Đại diện ${dept.tenKhoa}`;
+      const senderAssistant = senderUsers.find(u => u.vaiTro === 'TRO_LY');
+      if (senderAssistant) return senderAssistant.hoTen;
+
+      const assistantMap: Record<string, string> = {
+        'K-001': 'Trợ lý Khoa Nội',
+        'K-002': 'Trợ lý Khoa Ngoại',
+        'K-003': 'Trợ lý Khoa Sản',
+        'K-004': 'Trợ lý Khoa Nhi',
+        'K-005': 'Trợ lý Khoa Cấp cứu',
+      };
+      if (assistantMap[req.maKhoa]) return assistantMap[req.maKhoa];
     }
-    return 'Đại diện Bên giao';
+    return 'Trợ lý khoa';
   };
 
-  // Helper lấy tên người đại diện bên nhận
+  // Helper lấy tên trợ lý / người tiếp nhận bên nhận (không dùng mã nhân viên)
   const getReceiverPersonName = (req: PhieuYeuCauCapPhat) => {
     const parsedChecklist = typeof req.checklistKyThuat === 'string'
       ? (() => { try { return JSON.parse(req.checklistKyThuat); } catch { return null; } })()
       : req.checklistKyThuat;
-    if (parsedChecklist?.nguoiKiemTra) return parsedChecklist.nguoiKiemTra;
-    if (req.maNguoiNhanTest) return getUserName(req.maNguoiNhanTest);
+    
+    const rawInspector = parsedChecklist?.nguoiKiemTra;
+    if (rawInspector && rawInspector !== 'Cán bộ khoa' && rawInspector !== 'Đã kiểm tra' && !rawInspector.startsWith('ND-')) {
+      return getUserName(rawInspector);
+    }
+    if (req.maNguoiNhanTest) {
+      const name = getUserName(req.maNguoiNhanTest);
+      if (name && !name.startsWith('ND-')) return name;
+    }
+
+    // Ưu tiên tìm Trợ lý của khoa nhận
     if (req.maKhoaNhan) {
       const receiverUsers = users.filter(u => u.maKhoa === req.maKhoaNhan);
-      const receiverLead = receiverUsers.find(u => u.vaiTro === 'TRUONG_KHOA') || receiverUsers[0];
-      if (receiverLead) return receiverLead.hoTen;
-      const dept = departments.find(d => d.maKhoa === req.maKhoaNhan);
-      if (dept) return `Đại diện ${dept.tenKhoa}`;
+      const receiverAssistant = receiverUsers.find(u => u.vaiTro === 'TRO_LY');
+      if (receiverAssistant) return receiverAssistant.hoTen;
+
+      const assistantMap: Record<string, string> = {
+        'K-001': 'Trợ lý Khoa Nội',
+        'K-002': 'Trợ lý Khoa Ngoại',
+        'K-003': 'Trợ lý Khoa Sản',
+        'K-004': 'Trợ lý Khoa Nhi',
+        'K-005': 'Trợ lý Khoa Cấp cứu',
+      };
+      if (assistantMap[req.maKhoaNhan]) return assistantMap[req.maKhoaNhan];
     }
-    return 'Đại diện Bên nhận';
+    return 'Trợ lý khoa tiếp nhận';
   };
 
   // In ấn trực tiếp
@@ -512,8 +541,8 @@ export default function TransfersPage() {
     doc.setFont("helvetica", "normal");
     doc.text(`Ma so phieu: ${previewRequest.maPhieu}`, 14, 52);
     doc.text(`Ngay lap: ${new Date(previewRequest.ngayTao).toLocaleDateString('vi-VN')}`, 14, 58);
-    doc.text(`Ben giao: ${removeVietnameseTones(senderDeptName)} (${previewRequest.maKhoa}) - Nguoi giao: ${removeVietnameseTones(senderPersonName)}`, 14, 64);
-    doc.text(`Ben nhan: ${removeVietnameseTones(receiverDeptName)} (${previewRequest.maKhoaNhan || 'N/A'}) - Nguoi nhan: ${removeVietnameseTones(receiverPersonName)}`, 14, 70);
+    doc.text(`Khoa giao: ${removeVietnameseTones(senderDeptName)} - Nguoi dai dien: ${removeVietnameseTones(senderPersonName)}`, 14, 64);
+    doc.text(`Khoa nhan: ${removeVietnameseTones(receiverDeptName)} - Nguoi tiep nhan: ${removeVietnameseTones(receiverPersonName)}`, 14, 70);
     doc.text(`Thiet bi: ${removeVietnameseTones(previewRequest.items?.[0]?.tenThietBi || previewRequest.maThietBi)} - Ca the: ${previewRequest.maCaThe || 'N/A'}`, 14, 76);
     doc.text(`Trang thai: HOAN THANH - DA TIEP NHAN VAO KHOA`, 14, 82);
 
@@ -1539,7 +1568,7 @@ export default function TransfersPage() {
             <div className="space-y-4 py-2 text-xs sm:text-sm">
               <div className="bg-slate-50 p-3 rounded-xl border space-y-1 text-xs">
                 <div>Phiếu điều chuyển: <strong>{inspectingRequest.maPhieu}</strong></div>
-                <div>Từ khoa: <strong>{getDeptName(inspectingRequest.maKhoa)} ({inspectingRequest.maKhoa})</strong> ➔ Đến khoa: <strong>{getDeptName(inspectingRequest.maKhoaNhan)} ({inspectingRequest.maKhoaNhan})</strong></div>
+                <div>Từ khoa: <strong>{getDeptName(inspectingRequest.maKhoa)}</strong> ➔ Đến khoa: <strong>{getDeptName(inspectingRequest.maKhoaNhan)}</strong></div>
                 <div>Thiết bị: <strong>{inspectingRequest.items?.[0]?.tenThietBi || inspectingRequest.maThietBi}</strong> (Mã cá thể: <strong>{inspectingRequest.maCaThe || 'Chưa gán'}</strong>)</div>
               </div>
 
@@ -1702,13 +1731,13 @@ export default function TransfersPage() {
                   <div className="grid grid-cols-2 gap-4 bg-slate-50 p-3.5 rounded-lg border text-xs">
                     <div>
                       <div className="font-bold text-slate-700 mb-1">BÊN GIAO (Khoa đề xuất):</div>
-                      <div>Khoa: <strong>{senderDeptName}</strong> <span className="text-slate-500 font-mono">({previewRequest.maKhoa})</span></div>
-                      <div>Người đại diện: <strong className="text-purple-700">{senderPersonName}</strong></div>
+                      <div>Khoa: <strong className="text-slate-900">{senderDeptName}</strong></div>
+                      <div>Người đại diện: <strong className="text-purple-700 font-semibold">{senderPersonName}</strong></div>
                     </div>
                     <div>
                       <div className="font-bold text-slate-700 mb-1">BÊN NHẬN (Khoa thụ hưởng):</div>
-                      <div>Khoa tiếp nhận: <strong>{receiverDeptName}</strong> <span className="text-slate-500 font-mono">({previewRequest.maKhoaNhan || 'N/A'})</span></div>
-                      <div>Người tiếp nhận test: <strong className="text-emerald-700">{receiverPersonName}</strong></div>
+                      <div>Khoa tiếp nhận: <strong className="text-slate-900">{receiverDeptName}</strong></div>
+                      <div>Người tiếp nhận test: <strong className="text-emerald-700 font-semibold">{receiverPersonName}</strong></div>
                     </div>
                   </div>
 
