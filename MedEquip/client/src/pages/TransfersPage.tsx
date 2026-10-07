@@ -147,6 +147,13 @@ export default function TransfersPage() {
   useEffect(() => {
     setDepartments(store.getDepartments());
     setEquipmentList(store.getEquipment());
+    setUsers(store.getUsers());
+
+    fetchApi<any>('/users').then(res => {
+      const list = Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
+      if (list.length > 0) setUsers(list);
+    }).catch(() => {});
+
     loadNeeds();
     loadTransferRequests();
 
@@ -404,6 +411,76 @@ export default function TransfersPage() {
     setPreviewA4Open(true);
   };
 
+  // Helper lấy tên khoa từ mã
+  const getDeptName = (code?: string | null) => {
+    if (!code) return 'N/A';
+    const dept = departments.find(d => d.maKhoa === code);
+    if (dept) return dept.tenKhoa;
+    const hardcodedDepts: Record<string, string> = {
+      'K-001': 'Khoa Nội',
+      'K-002': 'Khoa Ngoại',
+      'K-003': 'Khoa Sản',
+      'K-004': 'Khoa Nhi',
+      'K-005': 'Khoa Cấp cứu',
+      'KHO_TONG': 'Kho Tổng / VTTBYT'
+    };
+    if (hardcodedDepts[code]) return hardcodedDepts[code];
+    return code;
+  };
+
+  // Helper lấy họ tên người dùng từ mã hoặc email hoặc tên
+  const getUserName = (idOrName?: string | null) => {
+    if (!idOrName) return '';
+    const found = users.find(u => u.maNguoiDung === idOrName || u.email === idOrName || u.hoTen === idOrName);
+    if (found) return found.hoTen;
+    const hardcodedUsers: Record<string, string> = {
+      'ND-001': 'Nguyễn Văn Admin',
+      'ND-002': 'Trần Thị Kho',
+      'ND-003': 'Trưởng khoa Nội',
+      'ND-004': 'Trưởng khoa Ngoại',
+      'ND-005': 'Trưởng khoa Sản',
+      'ND-006': 'Lê Văn Quản Lý',
+      'ND-007': 'Trợ lý Khoa Nội',
+      'ND-008': 'Trợ lý Khoa Ngoại',
+      'ND-009': 'Trợ lý Khoa Sản',
+    };
+    if (hardcodedUsers[idOrName]) return hardcodedUsers[idOrName];
+    return idOrName;
+  };
+
+  // Helper lấy tên người đại diện bên giao
+  const getSenderPersonName = (req: PhieuYeuCauCapPhat) => {
+    if (req.maNguoiYeuCau) {
+      const name = getUserName(req.maNguoiYeuCau);
+      if (name) return name;
+    }
+    if (req.maKhoa) {
+      const senderUsers = users.filter(u => u.maKhoa === req.maKhoa);
+      const senderLead = senderUsers.find(u => u.vaiTro === 'TRUONG_KHOA') || senderUsers[0];
+      if (senderLead) return senderLead.hoTen;
+      const dept = departments.find(d => d.maKhoa === req.maKhoa);
+      if (dept) return `Đại diện ${dept.tenKhoa}`;
+    }
+    return 'Đại diện Bên giao';
+  };
+
+  // Helper lấy tên người đại diện bên nhận
+  const getReceiverPersonName = (req: PhieuYeuCauCapPhat) => {
+    const parsedChecklist = typeof req.checklistKyThuat === 'string'
+      ? (() => { try { return JSON.parse(req.checklistKyThuat); } catch { return null; } })()
+      : req.checklistKyThuat;
+    if (parsedChecklist?.nguoiKiemTra) return parsedChecklist.nguoiKiemTra;
+    if (req.maNguoiNhanTest) return getUserName(req.maNguoiNhanTest);
+    if (req.maKhoaNhan) {
+      const receiverUsers = users.filter(u => u.maKhoa === req.maKhoaNhan);
+      const receiverLead = receiverUsers.find(u => u.vaiTro === 'TRUONG_KHOA') || receiverUsers[0];
+      if (receiverLead) return receiverLead.hoTen;
+      const dept = departments.find(d => d.maKhoa === req.maKhoaNhan);
+      if (dept) return `Đại diện ${dept.tenKhoa}`;
+    }
+    return 'Đại diện Bên nhận';
+  };
+
   // In ấn trực tiếp
   const handlePrint = () => {
     window.print();
@@ -412,6 +489,11 @@ export default function TransfersPage() {
   // Tải PDF Biên bản A4
   const handleDownloadPDF = () => {
     if (!previewRequest) return;
+    const senderDeptName = getDeptName(previewRequest.maKhoa);
+    const receiverDeptName = getDeptName(previewRequest.maKhoaNhan);
+    const senderPersonName = getSenderPersonName(previewRequest);
+    const receiverPersonName = getReceiverPersonName(previewRequest);
+
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     doc.setFont("helvetica", "bold");
     doc.setFontSize(14);
@@ -430,13 +512,13 @@ export default function TransfersPage() {
     doc.setFont("helvetica", "normal");
     doc.text(`Ma so phieu: ${previewRequest.maPhieu}`, 14, 52);
     doc.text(`Ngay lap: ${new Date(previewRequest.ngayTao).toLocaleDateString('vi-VN')}`, 14, 58);
-    doc.text(`Khoa giao: ${previewRequest.maKhoa}`, 14, 64);
-    doc.text(`Khoa nhan: ${previewRequest.maKhoaNhan || 'N/A'}`, 110, 64);
-    doc.text(`Thiet bi: ${removeVietnameseTones(previewRequest.maThietBi)} - Ca the: ${previewRequest.maCaThe || 'N/A'}`, 14, 70);
-    doc.text(`Trang thai: HOAN THANH - DA TIEP NHAN VAO KHOA`, 14, 76);
+    doc.text(`Ben giao: ${removeVietnameseTones(senderDeptName)} (${previewRequest.maKhoa}) - Nguoi giao: ${removeVietnameseTones(senderPersonName)}`, 14, 64);
+    doc.text(`Ben nhan: ${removeVietnameseTones(receiverDeptName)} (${previewRequest.maKhoaNhan || 'N/A'}) - Nguoi nhan: ${removeVietnameseTones(receiverPersonName)}`, 14, 70);
+    doc.text(`Thiet bi: ${removeVietnameseTones(previewRequest.items?.[0]?.tenThietBi || previewRequest.maThietBi)} - Ca the: ${previewRequest.maCaThe || 'N/A'}`, 14, 76);
+    doc.text(`Trang thai: HOAN THANH - DA TIEP NHAN VAO KHOA`, 14, 82);
 
     autoTable(doc, {
-      startY: 83,
+      startY: 88,
       head: [['STT', 'Tieu chi kiem tra ky thuat', 'Ket qua']],
       body: [
         ['1', 'Nguon & Pin luu dien (Khong chai, hoat dong on dinh)', 'DAT CHUAN [V]'],
@@ -449,13 +531,18 @@ export default function TransfersPage() {
       headStyles: { fillColor: [88, 28, 135] }
     });
 
-    const finalY = (doc as any).lastAutoTable?.finalY || 140;
-    doc.text("DAI DIEN KHOA GIAO", 35, finalY + 20, { align: "center" });
-    doc.text("(Ky, ghi ro ho ten)", 35, finalY + 26, { align: "center" });
-    doc.text("DAI DIEN KHOA NHAN", 105, finalY + 20, { align: "center" });
-    doc.text("(Ky, ghi ro ho ten)", 105, finalY + 26, { align: "center" });
-    doc.text("QUAN LY KHO / VTTBYT", 170, finalY + 20, { align: "center" });
-    doc.text("(Xac thuc he thong)", 170, finalY + 26, { align: "center" });
+    const finalY = (doc as any).lastAutoTable?.finalY || 145;
+    doc.text("DAI DIEN KHOA GIAO", 35, finalY + 16, { align: "center" });
+    doc.text(`(${removeVietnameseTones(senderDeptName)})`, 35, finalY + 21, { align: "center" });
+    doc.text(removeVietnameseTones(senderPersonName), 35, finalY + 33, { align: "center" });
+
+    doc.text("DAI DIEN KHOA NHAN", 105, finalY + 16, { align: "center" });
+    doc.text(`(${removeVietnameseTones(receiverDeptName)})`, 105, finalY + 21, { align: "center" });
+    doc.text(removeVietnameseTones(receiverPersonName), 105, finalY + 33, { align: "center" });
+
+    doc.text("QUAN LY KHO / VTTBYT", 170, finalY + 16, { align: "center" });
+    doc.text("(Phong VTTBYT)", 170, finalY + 21, { align: "center" });
+    doc.text("He thong tu dong", 170, finalY + 33, { align: "center" });
 
     doc.save(`BienBan_DieuChuyen_${previewRequest.maPhieu}.pdf`);
     toast({ title: 'Xuất PDF thành công', description: 'Biên bản điều chuyển thiết bị đã được tải về máy.' });
@@ -962,10 +1049,10 @@ export default function TransfersPage() {
                           </td>
 
                           <td className="py-3 px-4">
-                            <div className="font-semibold text-foreground flex items-center gap-1.5">
-                              <span className="text-slate-700">{req.maKhoa}</span>
-                              <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
-                              <span className="text-purple-700 font-bold">{req.maKhoaNhan || 'Khoa nhận'}</span>
+                            <div className="font-semibold text-foreground flex items-center gap-1.5 flex-wrap">
+                              <span className="text-slate-700">{getDeptName(req.maKhoa)}</span>
+                              <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                              <span className="text-purple-700 font-bold">{getDeptName(req.maKhoaNhan)}</span>
                             </div>
                             <div className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1 italic">
                               "{req.lyDo || 'Điều chuyển chi viện'}"
@@ -1452,7 +1539,7 @@ export default function TransfersPage() {
             <div className="space-y-4 py-2 text-xs sm:text-sm">
               <div className="bg-slate-50 p-3 rounded-xl border space-y-1 text-xs">
                 <div>Phiếu điều chuyển: <strong>{inspectingRequest.maPhieu}</strong></div>
-                <div>Từ khoa: <strong>{inspectingRequest.maKhoa}</strong> ➔ Đến khoa: <strong>{inspectingRequest.maKhoaNhan}</strong></div>
+                <div>Từ khoa: <strong>{getDeptName(inspectingRequest.maKhoa)} ({inspectingRequest.maKhoa})</strong> ➔ Đến khoa: <strong>{getDeptName(inspectingRequest.maKhoaNhan)} ({inspectingRequest.maKhoaNhan})</strong></div>
                 <div>Thiết bị: <strong>{inspectingRequest.items?.[0]?.tenThietBi || inspectingRequest.maThietBi}</strong> (Mã cá thể: <strong>{inspectingRequest.maCaThe || 'Chưa gán'}</strong>)</div>
               </div>
 
@@ -1579,151 +1666,161 @@ export default function TransfersPage() {
             </div>
           </DialogHeader>
 
-          {previewRequest && (
-            <div className="p-6 overflow-y-auto flex-1 bg-white text-slate-900 text-xs sm:text-sm font-sans" ref={printAreaRef}>
-              <div className="border border-slate-300 p-8 rounded-xl shadow-xs space-y-6">
-                {/* Header văn bản */}
-                <div className="grid grid-cols-2 text-center border-b pb-4">
-                  <div>
-                    <div className="font-bold uppercase text-xs">BỘ Y TẾ - BỆNH VIỆN ĐA KHOA</div>
-                    <div className="text-[11px] text-slate-500">Phòng Vật tư - Trang thiết bị Y tế</div>
-                  </div>
-                  <div>
-                    <div className="font-bold text-xs">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</div>
-                    <div className="text-[11px] font-semibold">Độc lập - Tự do - Hạnh phúc</div>
-                    <div className="w-24 h-0.5 bg-slate-400 mx-auto mt-1" />
-                  </div>
-                </div>
+          {previewRequest && (() => {
+            const senderDeptName = getDeptName(previewRequest.maKhoa);
+            const receiverDeptName = getDeptName(previewRequest.maKhoaNhan);
+            const senderPersonName = getSenderPersonName(previewRequest);
+            const receiverPersonName = getReceiverPersonName(previewRequest);
 
-                {/* Tiêu đề biên bản */}
-                <div className="text-center space-y-1">
-                  <h2 className="text-base sm:text-lg font-black uppercase tracking-wide text-purple-950">
-                    BIÊN BẢN BÀN GIAO & KIỂM ĐỊNH KỸ THUẬT THIẾT BỊ
-                  </h2>
-                  <p className="text-[11px] text-slate-500">
-                    Mã số văn bản: <span className="font-mono font-bold text-slate-800">{previewRequest.maPhieu}</span> | Ngày: {new Date(previewRequest.ngayTao).toLocaleDateString('vi-VN')}
-                  </p>
-                </div>
-
-                {/* Thông tin bàn giao */}
-                <div className="grid grid-cols-2 gap-4 bg-slate-50 p-3.5 rounded-lg border text-xs">
-                  <div>
-                    <div className="font-bold text-slate-700 mb-1">BÊN GIAO (Khoa đề xuất):</div>
-                    <div>Khoa: <strong>{previewRequest.maKhoa}</strong></div>
-                    <div>Người đại diện: <strong>{previewRequest.maNguoiYeuCau}</strong></div>
-                  </div>
-                  <div>
-                    <div className="font-bold text-slate-700 mb-1">BÊN NHẬN (Khoa thụ hưởng):</div>
-                    <div>Khoa tiếp nhận: <strong>{previewRequest.maKhoaNhan || 'N/A'}</strong></div>
-                    <div>Người tiếp nhận test: <strong>{previewRequest.maNguoiNhanTest || 'Cán bộ khoa'}</strong></div>
-                  </div>
-                </div>
-
-                {/* Bảng thiết bị */}
-                <div>
-                  <div className="font-bold text-xs mb-1.5 uppercase text-slate-700">1. Thông tin thiết bị bàn giao</div>
-                  <table className="w-full border border-slate-300 text-xs">
-                    <thead>
-                      <tr className="bg-slate-100 border-b">
-                        <th className="border p-2 text-center w-10">STT</th>
-                        <th className="border p-2 text-left">Tên trang thiết bị</th>
-                        <th className="border p-2 text-center">Mã cá thể</th>
-                        <th className="border p-2 text-center">Số lượng</th>
-                        <th className="border p-2 text-left">Lý do điều chuyển</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td className="border p-2 text-center">1</td>
-                        <td className="border p-2 font-bold">{previewRequest.items?.[0]?.tenThietBi || previewRequest.maThietBi}</td>
-                        <td className="border p-2 text-center font-mono text-purple-700 font-bold">{previewRequest.maCaThe || 'Chưa gán'}</td>
-                        <td className="border p-2 text-center">1 Bộ</td>
-                        <td className="border p-2 italic">{previewRequest.lyDo || 'Chi viện lâm sàng'}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Bảng checklist kiểm định */}
-                <div>
-                  <div className="font-bold text-xs mb-1.5 uppercase text-slate-700">2. Kết quả kiểm tra kỹ thuật tại chỗ</div>
-                  <table className="w-full border border-slate-300 text-xs">
-                    <thead>
-                      <tr className="bg-slate-100 border-b">
-                        <th className="border p-2 text-center w-10">STT</th>
-                        <th className="border p-2 text-left">Tiêu chí kiểm tra an toàn kỹ thuật</th>
-                        <th className="border p-2 text-center w-28">Kết quả</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td className="border p-2 text-center">1</td>
-                        <td className="border p-2">Nguồn điện & Pin lưu điện (Khởi động tốt, pin nạp xả bình thường)</td>
-                        <td className="border p-2 text-center font-bold text-emerald-700">ĐẠT CHUẨN [✓]</td>
-                      </tr>
-                      <tr>
-                        <td className="border p-2 text-center">2</td>
-                        <td className="border p-2">Màn hình hiển thị & Bàn phím điều khiển (Sắc nét, phím nhạy bén)</td>
-                        <td className="border p-2 text-center font-bold text-emerald-700">ĐẠT CHUẨN [✓]</td>
-                      </tr>
-                      <tr>
-                        <td className="border p-2 text-center">3</td>
-                        <td className="border p-2">Cảm biến, đầu dò & Cáp kết nối (Đầy đủ phụ kiện tiêu chuẩn đi kèm)</td>
-                        <td className="border p-2 text-center font-bold text-emerald-700">ĐẠT CHUẨN [✓]</td>
-                      </tr>
-                      <tr>
-                        <td className="border p-2 text-center">4</td>
-                        <td className="border p-2">Kiểm soát nhiễm khuẩn & Khử khuẩn lâm sàng (Đã tiệt trùng đạt chuẩn)</td>
-                        <td className="border p-2 text-center font-bold text-emerald-700">ĐẠT CHUẨN [✓]</td>
-                      </tr>
-                      <tr>
-                        <td className="border p-2 text-center">5</td>
-                        <td className="border p-2">Ngoại quan, vỏ máy & Tem kiểm định (Nguyên vẹn, còn hiệu lực)</td>
-                        <td className="border p-2 text-center font-bold text-emerald-700">ĐẠT CHUẨN [✓]</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Chữ ký 3 bên & QR code */}
-                <div className="pt-4 border-t flex items-end justify-between">
-                  <div className="flex items-center gap-3">
-                    <QRCodeComponent value={previewRequest.maPhieu} size={64} className="border p-1 rounded" />
-                    <div className="text-[10px] text-slate-500">
-                      <div>Xác thực số: <strong>{previewRequest.maPhieu}</strong></div>
-                      <div>Hệ thống QLTTBYT MedEquip</div>
+            return (
+              <div className="p-6 overflow-y-auto flex-1 bg-white text-slate-900 text-xs sm:text-sm font-sans" ref={printAreaRef}>
+                <div className="border border-slate-300 p-8 rounded-xl shadow-xs space-y-6">
+                  {/* Header văn bản */}
+                  <div className="grid grid-cols-2 text-center border-b pb-4">
+                    <div>
+                      <div className="font-bold uppercase text-xs">BỘ Y TẾ - BỆNH VIỆN ĐA KHOA</div>
+                      <div className="text-[11px] text-slate-500">Phòng Vật tư - Trang thiết bị Y tế</div>
+                    </div>
+                    <div>
+                      <div className="font-bold text-xs">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</div>
+                      <div className="text-[11px] font-semibold">Độc lập - Tự do - Hạnh phúc</div>
+                      <div className="w-24 h-0.5 bg-slate-400 mx-auto mt-1" />
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-8 text-center text-xs">
+                  {/* Tiêu đề biên bản */}
+                  <div className="text-center space-y-1">
+                    <h2 className="text-base sm:text-lg font-black uppercase tracking-wide text-purple-950">
+                      BIÊN BẢN BÀN GIAO & KIỂM ĐỊNH KỸ THUẬT THIẾT BỊ
+                    </h2>
+                    <p className="text-[11px] text-slate-500">
+                      Mã số văn bản: <span className="font-mono font-bold text-slate-800">{previewRequest.maPhieu}</span> | Ngày: {new Date(previewRequest.ngayTao).toLocaleDateString('vi-VN')}
+                    </p>
+                  </div>
+
+                  {/* Thông tin bàn giao */}
+                  <div className="grid grid-cols-2 gap-4 bg-slate-50 p-3.5 rounded-lg border text-xs">
                     <div>
-                      <div className="font-bold">ĐẠI DIỆN KHOA GIAO</div>
-                      <div className="text-[10px] text-slate-400 mt-0.5">(Ký điện tử)</div>
-                      <div className="h-12 flex items-center justify-center font-serif text-purple-800 font-bold italic">
-                        {previewRequest.maNguoiYeuCau}
+                      <div className="font-bold text-slate-700 mb-1">BÊN GIAO (Khoa đề xuất):</div>
+                      <div>Khoa: <strong>{senderDeptName}</strong> <span className="text-slate-500 font-mono">({previewRequest.maKhoa})</span></div>
+                      <div>Người đại diện: <strong className="text-purple-700">{senderPersonName}</strong></div>
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-700 mb-1">BÊN NHẬN (Khoa thụ hưởng):</div>
+                      <div>Khoa tiếp nhận: <strong>{receiverDeptName}</strong> <span className="text-slate-500 font-mono">({previewRequest.maKhoaNhan || 'N/A'})</span></div>
+                      <div>Người tiếp nhận test: <strong className="text-emerald-700">{receiverPersonName}</strong></div>
+                    </div>
+                  </div>
+
+                  {/* Bảng thiết bị */}
+                  <div>
+                    <div className="font-bold text-xs mb-1.5 uppercase text-slate-700">1. Thông tin thiết bị bàn giao</div>
+                    <table className="w-full border border-slate-300 text-xs">
+                      <thead>
+                        <tr className="bg-slate-100 border-b">
+                          <th className="border p-2 text-center w-10">STT</th>
+                          <th className="border p-2 text-left">Tên trang thiết bị</th>
+                          <th className="border p-2 text-center">Mã cá thể</th>
+                          <th className="border p-2 text-center">Số lượng</th>
+                          <th className="border p-2 text-left">Lý do điều chuyển</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td className="border p-2 text-center">1</td>
+                          <td className="border p-2 font-bold">{previewRequest.items?.[0]?.tenThietBi || previewRequest.maThietBi}</td>
+                          <td className="border p-2 text-center font-mono text-purple-700 font-bold">{previewRequest.maCaThe || 'Chưa gán'}</td>
+                          <td className="border p-2 text-center">1 Bộ</td>
+                          <td className="border p-2 italic">{previewRequest.lyDo || 'Chi viện lâm sàng'}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Bảng checklist kiểm định */}
+                  <div>
+                    <div className="font-bold text-xs mb-1.5 uppercase text-slate-700">2. Kết quả kiểm tra kỹ thuật tại chỗ</div>
+                    <table className="w-full border border-slate-300 text-xs">
+                      <thead>
+                        <tr className="bg-slate-100 border-b">
+                          <th className="border p-2 text-center w-10">STT</th>
+                          <th className="border p-2 text-left">Tiêu chí kiểm tra an toàn kỹ thuật</th>
+                          <th className="border p-2 text-center w-28">Kết quả</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td className="border p-2 text-center">1</td>
+                          <td className="border p-2">Nguồn điện & Pin lưu điện (Khởi động tốt, pin nạp xả bình thường)</td>
+                          <td className="border p-2 text-center font-bold text-emerald-700">ĐẠT CHUẨN [✓]</td>
+                        </tr>
+                        <tr>
+                          <td className="border p-2 text-center">2</td>
+                          <td className="border p-2">Màn hình hiển thị & Bàn phím điều khiển (Sắc nét, phím nhạy bén)</td>
+                          <td className="border p-2 text-center font-bold text-emerald-700">ĐẠT CHUẨN [✓]</td>
+                        </tr>
+                        <tr>
+                          <td className="border p-2 text-center">3</td>
+                          <td className="border p-2">Cảm biến, đầu dò & Cáp kết nối (Đầy đủ phụ kiện tiêu chuẩn đi kèm)</td>
+                          <td className="border p-2 text-center font-bold text-emerald-700">ĐẠT CHUẨN [✓]</td>
+                        </tr>
+                        <tr>
+                          <td className="border p-2 text-center">4</td>
+                          <td className="border p-2">Kiểm soát nhiễm khuẩn & Khử khuẩn lâm sàng (Đã tiệt trùng đạt chuẩn)</td>
+                          <td className="border p-2 text-center font-bold text-emerald-700">ĐẠT CHUẨN [✓]</td>
+                        </tr>
+                        <tr>
+                          <td className="border p-2 text-center">5</td>
+                          <td className="border p-2">Ngoại quan, vỏ máy & Tem kiểm định (Nguyên vẹn, còn hiệu lực)</td>
+                          <td className="border p-2 text-center font-bold text-emerald-700">ĐẠT CHUẨN [✓]</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Chữ ký 3 bên & QR code */}
+                  <div className="pt-4 border-t flex items-end justify-between">
+                    <div className="flex items-center gap-3">
+                      <QRCodeComponent value={previewRequest.maPhieu} size={64} className="border p-1 rounded" />
+                      <div className="text-[10px] text-slate-500">
+                        <div>Xác thực số: <strong>{previewRequest.maPhieu}</strong></div>
+                        <div>Hệ thống QLTTBYT MedEquip</div>
                       </div>
                     </div>
 
-                    <div>
-                      <div className="font-bold">ĐẠI DIỆN KHOA NHẬN</div>
-                      <div className="text-[10px] text-slate-400 mt-0.5">(Ký điện tử)</div>
-                      <div className="h-12 flex items-center justify-center font-serif text-emerald-800 font-bold italic">
-                        {previewRequest.maNguoiNhanTest || 'Đã kiểm tra'}
+                    <div className="grid grid-cols-3 gap-8 text-center text-xs">
+                      <div>
+                        <div className="font-bold text-slate-800">ĐẠI DIỆN KHOA GIAO</div>
+                        <div className="text-[10px] text-slate-500 font-medium">{senderDeptName}</div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">(Ký điện tử)</div>
+                        <div className="min-h-12 flex flex-col items-center justify-center font-serif text-purple-800 font-bold italic pt-2">
+                          <span>{senderPersonName}</span>
+                        </div>
                       </div>
-                    </div>
 
-                    <div>
-                      <div className="font-bold">QUẢN LÝ KHO</div>
-                      <div className="text-[10px] text-slate-400 mt-0.5">(Lưu vết tự động)</div>
-                      <div className="h-12 flex items-center justify-center font-serif text-blue-800 font-bold italic">
-                        Hệ thống tự động
+                      <div>
+                        <div className="font-bold text-slate-800">ĐẠI DIỆN KHOA NHẬN</div>
+                        <div className="text-[10px] text-slate-500 font-medium">{receiverDeptName}</div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">(Ký điện tử)</div>
+                        <div className="min-h-12 flex flex-col items-center justify-center font-serif text-emerald-800 font-bold italic pt-2">
+                          <span>{receiverPersonName}</span>
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="font-bold text-slate-800">QUẢN LÝ KHO</div>
+                        <div className="text-[10px] text-slate-500 font-medium">Phòng VTTBYT</div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">(Lưu vết tự động)</div>
+                        <div className="min-h-12 flex flex-col items-center justify-center font-serif text-blue-800 font-bold italic pt-2">
+                          <span>Hệ thống tự động</span>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
         </DialogContent>
       </Dialog>
     </div>

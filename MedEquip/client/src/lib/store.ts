@@ -6,7 +6,12 @@ const defaultUsers: NguoiDung[] = [
   { maNguoiDung: 'ND-003', hoTen: 'Trưởng khoa Nội', email: 'khoanoi@benhvien.vn', matKhau: '123456', vaiTro: 'TRUONG_KHOA', maKhoa: 'K-001', trangThai: true, ngayTao: '2026-01-01', ngayCapNhat: '2026-01-01' },
   { maNguoiDung: 'ND-004', hoTen: 'Trưởng khoa Ngoại', email: 'khoangoai@benhvien.vn', matKhau: '123456', vaiTro: 'TRUONG_KHOA', maKhoa: 'K-002', trangThai: true, ngayTao: '2026-01-01', ngayCapNhat: '2026-01-01' },
   { maNguoiDung: 'ND-005', hoTen: 'Trưởng khoa Sản', email: 'khoasan@benhvien.vn', matKhau: '123456', vaiTro: 'TRUONG_KHOA', maKhoa: 'K-003', trangThai: true, ngayTao: '2026-01-01', ngayCapNhat: '2026-01-01' },
+  { maNguoiDung: 'ND-006', hoTen: 'Lê Văn Quản Lý', email: 'qlkho@benhvien.vn', matKhau: '123456', vaiTro: 'QL_KHO', trangThai: true, ngayTao: '2026-01-01', ngayCapNhat: '2026-01-01' },
+  { maNguoiDung: 'ND-007', hoTen: 'Trợ lý Khoa Nội', email: 'troly.noi@benhvien.vn', matKhau: '123456', vaiTro: 'TRO_LY', maKhoa: 'K-001', trangThai: true, ngayTao: '2026-01-01', ngayCapNhat: '2026-01-01' },
+  { maNguoiDung: 'ND-008', hoTen: 'Trợ lý Khoa Ngoại', email: 'troly.ngoai@benhvien.vn', matKhau: '123456', vaiTro: 'TRO_LY', maKhoa: 'K-002', trangThai: true, ngayTao: '2026-01-01', ngayCapNhat: '2026-01-01' },
+  { maNguoiDung: 'ND-009', hoTen: 'Trợ lý Khoa Sản', email: 'troly.san@benhvien.vn', matKhau: '123456', vaiTro: 'TRO_LY', maKhoa: 'K-003', trangThai: true, ngayTao: '2026-01-01', ngayCapNhat: '2026-01-01' },
 ];
+
 
 const defaultEquipment: ThietBi[] = [
   { maThietBi: 'TB-001', tenThietBi: 'Máy đo huyết áp', loaiThietBi: 'TAI_SU_DUNG', donViCoSo: 'Cái', donViNhap: 'Hộp', heSoQuyDoi: 1, nguongCanhBao: 5, moTa: 'Máy đo huyết áp tự động', maNhaCungCap: 'NCC-001', trangThai: true, ngayTao: '2026-01-01', hinhAnh: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/4f/Vital_signs_monitor.jpg/320px-Vital_signs_monitor.jpg' },
