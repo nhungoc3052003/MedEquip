@@ -11,7 +11,7 @@ khi mượn thì nvkho sẽ gắn mã sp cho khoa nào mượn
 phải có số lần đã nhập sp (ngày , nhập bao nhiêu), lưu trữ dữ liệu
 8. phiếu trả phải có ngày trả và biểu mẫu
 có số thứ tự , thống kê có bn thiết bị đến hạn
-khi trả thì tình trạng chỉ để trả, còn nghiệp vụ anh nhân viên kho thì sẽ đến kiểm tra sp và thu hồi
+0
 *: xuất file danh sách thiết bị đã mượn ( vd trong năm )
 
 1. chỉnh lại kho: cấp phát tb đề xuất, thống kê số lượng còn lại trong kho/ số lượng mượn, tb lịch btrisuachua
@@ -19,6 +19,21 @@ qlikho: chỉnh lại duyệt chung và tự động, xem báo cáo
 troly: bỏ khia báo đề xuất trả , đề xuất mượn trả gia hạn, xóa bảo trì 
 truongkhoa: ko có đề xuất bảo trì, 
 2. điều chỉnh:
-trường hợp kho thiếu thì mưới thông báo chung cho khoa kiểm tra lại thiết bị có dư hay khonong thì đề xuất lên => xây dựng kênh chung cho trợ lý và kho
+trường hợp kho thiếu thì mới thông báo chung cho khoa kiểm tra lại thiết bị có dư hay không thì đề xuất lên => xây dựng kênh chung cho trợ lý và kho
 mục tác vụ thêm "điều chỉnh": để thông báo dư thiếu thiết bị, khoa nào cần thì đăng kí xong chuyển qua 
 3.trợ lí: thêm cột số
+ 
+xóa phần lọc không cần thiết của mục qly kho 
+---------
+1. thêm tài khoản mới phải có hồ sơ cá nhân ( đính kèm hồ sơ cá nhân)
+cấp tài khoản: gửi email tài khoản cho email cá nhân nhân sự đó 
+2. tách đăng nhập và đổi mật khẩu (use)
+3. chỗ yêu cầu cấp phát: phân mục ( phẫu thuật, máy khám,....) chia top các mục thiết bị
+4. xóa tạo đề xuất mới => đề xuất thêm 
+đổi tên yêu cầu cấp phát thành yc đề xuất 
+đổi giỏ hàng thành thiết bị đề xuất 
+5. lịch sử nhập xuất kho: tìm kiếm theo quý theo tháng nhập số lượng bao nhiêu trong kho 
+ví dụ; theo quý tiêu ...
+6. xuất lượt đồ quan hệ,
+chỉ ra các thông báo lỗi 
+

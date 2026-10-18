@@ -1,5 +1,11 @@
 export type UserRole = 'ADMIN' | 'NV_KHO' | 'TRUONG_KHOA' | 'QL_KHO' | 'TRO_LY';
 
+export interface FileHoSo {
+  tenFile: string;
+  duongDan: string;
+  dungLuong?: number;
+}
+
 export interface NguoiDung {
   maNguoiDung: string;
   hoTen: string;
@@ -12,13 +18,46 @@ export interface NguoiDung {
   soDienThoai?: string;
   diaChi?: string;
   maKhoa?: string;
+  tenKhoa?: string;
+  cccd?: string;
+  ngaySinh?: string;
+  chucDanh?: string;
+  fileHoSo?: FileHoSo[];
+  yeuCauDoiMatKhau?: boolean;
 }
+
+export interface YeuCauCapTaiKhoan {
+  maYeuCau: string;
+  nguoiYeuCau: string;
+  tenNguoiYeuCau?: string;
+  maKhoa: string;
+  tenKhoa?: string;
+  hoTen: string;
+  email: string;
+  soDienThoai?: string;
+  cccd?: string;
+  ngaySinh?: string;
+  chucDanh?: string;
+  vaiTro: UserRole;
+  fileDinhKem: FileHoSo[];
+  ghiChu?: string;
+  trangThai: 'CHO_DUYET' | 'DA_DUYET' | 'TU_CHOI';
+  lyDoTuChoi?: string;
+  maNguoiDungTao?: string;
+  nguoiDuyet?: string;
+  tenNguoiDuyet?: string;
+  ngayDuyet?: string;
+  ngayTao: string;
+}
+
+export type NhomThietBi = 'KHAM_BENH' | 'PHAU_THUAT' | 'CAP_CUU' | 'VAT_TU_TIEU_HAO' | 'KHAC';
 
 // v4: ThietBi với loai ENUM và các trường mới
 export interface ThietBi {
   maThietBi: string;
   tenThietBi: string;
   loaiThietBi: 'VAT_TU_TIEU_HAO' | 'TAI_SU_DUNG';
+  nhomThietBi?: NhomThietBi;
   donViCoSo: string;
   donViNhap: string;
   heSoQuyDoi: number;
@@ -68,7 +107,7 @@ export interface Khoa {
   trangThai: boolean;
 }
 
-export type LoaiDeXuat = 'CAP_PHAT' | 'DIEU_CHUYEN' | 'MUA_SAM' | 'BAO_HONG';
+export type LoaiDeXuat = 'CAP_PHAT' | 'DIEU_CHUYEN' | 'MUA_SAM' | 'BAO_HONG' | 'DE_XUAT_THEM';
 
 export interface PhieuYeuCauCapPhat {
   maPhieu: string;
@@ -306,6 +345,24 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   TRO_LY: 'Trợ lý Khoa',
 };
 
+export function getUserRoleWithDept(user?: Partial<NguoiDung> | null, deptName?: string): string {
+  if (!user || !user.vaiTro) return '';
+  const dName = (deptName || user.tenKhoa || '').trim();
+  if (user.vaiTro === 'TRO_LY') {
+    if (dName) {
+      return dName.toLowerCase().startsWith('khoa') ? `Trợ lý ${dName}` : `Trợ lý Khoa ${dName}`;
+    }
+    return 'Trợ lý Khoa';
+  }
+  if (user.vaiTro === 'TRUONG_KHOA') {
+    if (dName) {
+      return dName.toLowerCase().startsWith('khoa') ? `Trưởng ${dName}` : `Trưởng khoa ${dName}`;
+    }
+    return 'Trưởng Khoa';
+  }
+  return ROLE_LABELS[user.vaiTro] || user.vaiTro;
+}
+
 export const ROLE_COLORS: Record<UserRole, string> = {
   ADMIN: 'bg-destructive/10 text-destructive',
   QL_KHO: 'bg-indigo-100 text-indigo-700',
@@ -359,6 +416,7 @@ export interface MaintenanceItem {
   soNgayConLai: number | null;
   soLuongKho: number;
   soLuongDangDung: number;
+  soLuongTaiKhoa?: number;
   viTriHienTai: string;
   dangSuDung: boolean;
   tenNhaCungCap: string;
@@ -392,4 +450,58 @@ export const TRANG_THAI_BAO_TRI_LABELS: Record<string, string> = {
   QUA_HAN: 'Quá hạn bảo trì',
   HONG_CHO_SUA: 'Hỏng / Chờ sửa',
 };
+
+export const NHOM_THIET_BI_MAP: Record<NhomThietBi, { label: string; shortLabel: string; color: string; badgeClass: string }> = {
+  KHAM_BENH: {
+    label: 'Khám & Chẩn đoán',
+    shortLabel: 'Khám & Chẩn đoán',
+    color: 'text-sky-600',
+    badgeClass: 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800'
+  },
+  PHAU_THUAT: {
+    label: 'Phẫu thuật & Ngoại khoa',
+    shortLabel: 'Phẫu thuật',
+    color: 'text-violet-600',
+    badgeClass: 'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:border-violet-800'
+  },
+  CAP_CUU: {
+    label: 'Cấp cứu & Hồi sức (ICU)',
+    shortLabel: 'Cấp cứu - Hồi sức',
+    color: 'text-rose-600',
+    badgeClass: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800'
+  },
+  VAT_TU_TIEU_HAO: {
+    label: 'Vật tư y tế tiêu hao',
+    shortLabel: 'Vật tư tiêu hao',
+    color: 'text-emerald-600',
+    badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800'
+  },
+  KHAC: {
+    label: 'Khác / Dụng cụ phụ trợ',
+    shortLabel: 'Khác',
+    color: 'text-slate-600',
+    badgeClass: 'bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:border-slate-800'
+  }
+};
+
+export function detectNhomThietBiFrontend(tb?: Partial<ThietBi> | null): NhomThietBi {
+  if (!tb) return 'KHAC';
+  if (tb.nhomThietBi && ['KHAM_BENH', 'PHAU_THUAT', 'CAP_CUU', 'VAT_TU_TIEU_HAO', 'KHAC'].includes(tb.nhomThietBi)) {
+    return tb.nhomThietBi;
+  }
+  if (tb.loaiThietBi === 'VAT_TU_TIEU_HAO') {
+    return 'VAT_TU_TIEU_HAO';
+  }
+  const name = (tb.tenThietBi || '').toLowerCase();
+  if (/(phẫu thuật|dao mổ|kẹp|forceps|scalpel|hút dịch phẫu thuật|tiểu phẫu|phong mổ)/i.test(name)) {
+    return 'PHAU_THUAT';
+  }
+  if (/(thở|ventilator|phá rung|sốc tim|aed|monitor|theo dõi|bơm tiêm điện|oxy|giường bệnh|hồi sức|cấp cứu)/i.test(name)) {
+    return 'CAP_CUU';
+  }
+  if (/(khám|siêu âm|x-quang|điện tim|ecg|huyết áp|ống nghe|nội soi|chẩn đoán|thân nhiệt)/i.test(name)) {
+    return 'KHAM_BENH';
+  }
+  return 'KHAC';
+}
 

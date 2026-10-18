@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import { NguoiDung } from '@/types';
 import { loginApi, logoutApi, LoginResponse } from '@/services/authService';
+import { fetchApi } from '@/services/api';
 import { loadAllData } from '@/lib/dataLoader';
 import { store } from '@/lib/store';
 
@@ -8,6 +9,7 @@ interface AuthContextType {
   user: NguoiDung | null;
   login: (email: string, password: string) => Promise<LoginResponse>;
   logout: () => void;
+  updateCurrentUser: (updates: Partial<NguoiDung>) => void;
   isLoggedIn: boolean;
   dataLoaded: boolean;
 }
@@ -34,10 +36,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
   const [dataLoaded, setDataLoaded] = useState(false);
 
-  // Load data on initial mount if user exists
+  // Load data on initial mount if user exists and sync fresh profile
   React.useEffect(() => {
     if (user) {
       loadAllData(user.maNguoiDung).then(() => setDataLoaded(true));
+      fetchApi<{ success: boolean; user?: NguoiDung }>('/auth/me')
+        .then(res => {
+          if (res?.success && res.user) {
+            setUser(res.user);
+            localStorage.setItem('kho_currentUser', JSON.stringify(res.user));
+          }
+        })
+        .catch(() => {});
     }
   }, []);
 
@@ -56,6 +66,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return result;
   }, []);
 
+  const updateCurrentUser = useCallback((updates: Partial<NguoiDung>) => {
+    setUser(prev => {
+      if (!prev) return null;
+      const updated = { ...prev, ...updates };
+      localStorage.setItem('kho_currentUser', JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
+
   const logout = useCallback(async () => {
     await logoutApi().catch(() => {});
     setUser(null);
@@ -66,7 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, isLoggedIn: !!user, dataLoaded }}>
+    <AuthContext.Provider value={{ user, login, logout, updateCurrentUser, isLoggedIn: !!user, dataLoaded }}>
       {children}
     </AuthContext.Provider>
   );

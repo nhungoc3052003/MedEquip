@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { store } from '@/lib/store';
-import { ThietBi, ROLE_LABELS, LOAI_THIET_BI_COLORS, LOAI_THIET_BI_LABELS, TINH_TRANG_TRA_LABELS } from '@/types';
+import { ThietBi, ROLE_LABELS, LOAI_THIET_BI_COLORS, LOAI_THIET_BI_LABELS, TINH_TRANG_TRA_LABELS, getUserRoleWithDept } from '@/types';
 import { getDueStatus } from './ReturnsPage';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -63,7 +63,9 @@ export default function DashboardPage() {
     <div className="space-y-6 animate-fade-in">
       <div>
         <h2 className="text-2xl font-bold text-foreground">Xin chào, {user.hoTen}!</h2>
-        <p className="text-muted-foreground">Vai trò: {ROLE_LABELS[user.vaiTro]}</p>
+        <p className="text-muted-foreground">
+          Vai trò: {getUserRoleWithDept(user, departments.find(d => d.maKhoa === user.maKhoa)?.tenKhoa)}
+        </p>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

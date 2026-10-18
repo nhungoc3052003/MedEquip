@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { UserRole, ROLE_LABELS } from '@/types';
+import { UserRole, ROLE_LABELS, getUserRoleWithDept } from '@/types';
 import { store } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -156,7 +156,9 @@ export default function AppLayout({ currentPage, onNavigate, children }: AppLayo
           {!collapsed && (
             <div className="min-w-0">
               <p className="text-sm font-medium text-sidebar-accent-foreground truncate">{user.hoTen}</p>
-              <p className="text-xs text-sidebar-foreground truncate">{ROLE_LABELS[user.vaiTro]}</p>
+              <p className="text-xs text-sidebar-foreground truncate" title={getUserRoleWithDept(user, store.getDepartments().find(d => d.maKhoa === user.maKhoa)?.tenKhoa)}>
+                {getUserRoleWithDept(user, store.getDepartments().find(d => d.maKhoa === user.maKhoa)?.tenKhoa)}
+              </p>
             </div>
           )}
         </div>

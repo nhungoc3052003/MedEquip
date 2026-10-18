@@ -12,6 +12,8 @@ import departmentRoutes from "./routes/departments.js";
 import importRoutes from "./routes/imports.js";
 import exportRoutes from "./routes/exports.js";
 import requestRoutes from "./routes/requests.js";
+import path from "path";
+import { fileURLToPath } from "url";
 import allocationRoutes from "./routes/allocations.js";
 import damageReportRoutes from "./routes/damageReports.js";
 import notificationRoutes from "./routes/notifications.js";
@@ -20,9 +22,14 @@ import returnRoutes from "./routes/returns.js";
 import maintenanceRoutes from "./routes/maintenance.js";
 import instanceRoutes from "./routes/instances.js";
 import needsRoutes from "./routes/needs.js";
+import accountRequestRoutes from "./routes/accountRequests.js";
 import { checkAndSendDueNotifications } from "./services/dueNotificationService.js";
 
+// Nạp cấu hình môi trường (.env) bao gồm Gmail SMTP
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 
@@ -41,6 +48,9 @@ app.use(cors({
 }));
 app.use(express.json({ limit: "20mb" }));
 app.use(express.urlencoded({ extended: true, limit: "20mb" }));
+
+// Phục vụ tĩnh thư mục uploads (hồ sơ, chứng chỉ scan)
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // Request Logger
 app.use((req, res, next) => {
@@ -64,6 +74,7 @@ app.get("/api/test-db", async (req, res) => {
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
+app.use("/api/account-requests", accountRequestRoutes);
 app.use("/api/equipment", equipmentRoutes);
 app.use("/api/inventory", inventoryRoutes);
 app.use("/api/suppliers", supplierRoutes);

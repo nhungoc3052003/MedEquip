@@ -1,6 +1,7 @@
 import { pool } from "../config/db.js";
 import * as XLSX from "xlsx";
 import { sendNotification, sendNotificationToRoles } from "../utils/notificationHelper.js";
+import { detectNhomThietBi } from "../utils/categoryHelper.js";
 
 // ──────────────────────────────────────────────
 // GET /imports — Lịch sử nhập kho
@@ -320,11 +321,12 @@ export async function confirmImportFromExcel(req, res) {
       const [existing] = await conn.query("SELECT ma_thiet_bi, chu_ky_bao_tri, ngay_bao_tri_tiep_theo FROM thiet_bi WHERE ma_thiet_bi = ?", [maThietBi]);
       if (existing.length === 0) {
         // INSERT thiết bị mới kèm mốc bảo trì nếu là thiết bị tái sử dụng
+        const nhom = detectNhomThietBi(tenThietBi, loai, row.nhomThietBi || row.nhom_thiet_bi);
         await conn.query(
-          `INSERT INTO thiet_bi (ma_thiet_bi, ten_thiet_bi, loai_thiet_bi, don_vi_co_so, don_vi_nhap, he_so_quy_doi,
+          `INSERT INTO thiet_bi (ma_thiet_bi, ten_thiet_bi, loai_thiet_bi, nhom_thiet_bi, don_vi_co_so, don_vi_nhap, he_so_quy_doi,
            serial_number, ma_nha_cung_cap, hinh_anh, chu_ky_bao_tri, ngay_bao_tri_tiep_theo, trang_thai_bao_tri, trang_thai)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BINH_THUONG', TRUE)`,
-          [maThietBi, tenThietBi, loai, donViCoSo, donViNhap, heSoQuyDoi, serialNumber || null, maNcc, urlAnh || "", chuKy, ngayBaoTri]
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BINH_THUONG', TRUE)`,
+          [maThietBi, tenThietBi, loai, nhom, donViCoSo, donViNhap, heSoQuyDoi, serialNumber || null, maNcc, urlAnh || "", chuKy, ngayBaoTri]
         );
         // Tạo bản ghi tồn kho trống nếu chưa có
         const tkId = "TK-" + maThietBi;

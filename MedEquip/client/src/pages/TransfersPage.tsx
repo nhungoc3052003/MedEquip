@@ -6,7 +6,7 @@ import {
   apiGetNeeds, apiCreateNeed, apiCloseNeed, apiReopenNeed,
   apiCreateRequest, apiApproveRequest, apiConfirmTransfer 
 } from '@/lib/apiSync';
-import { PhieuYeuCauCapPhat, NhuCauThietBi, ThietBi, Khoa } from '@/types';
+import { PhieuYeuCauCapPhat, NhuCauThietBi, ThietBi, Khoa, NguoiDung } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -81,8 +81,9 @@ export default function TransfersPage() {
   const [transferFilterStatus, setTransferFilterStatus] = useState<string>('ALL');
 
   // Dữ liệu tham chiếu
-  const [departments, setDepartments] = useState<Khoa[]>([]);
-  const [equipmentList, setEquipmentList] = useState<ThietBi[]>([]);
+  const [departments, setDepartments] = useState<Khoa[]>(() => store.getDepartments());
+  const [users, setUsers] = useState<NguoiDung[]>(() => store.getUsers());
+  const [equipmentList, setEquipmentList] = useState<ThietBi[]>(() => store.getEquipment());
   const [deptInstances, setDeptInstances] = useState<any[]>([]);
   const [loadingDeptInstances, setLoadingDeptInstances] = useState(false);
 
@@ -418,7 +419,7 @@ export default function TransfersPage() {
   // Helper lấy tên khoa từ mã
   const getDeptName = (code?: string | null) => {
     if (!code) return 'N/A';
-    const dept = departments.find(d => d.maKhoa === code);
+    const dept = (departments || []).find(d => d.maKhoa === code);
     if (dept) return dept.tenKhoa;
     const hardcodedDepts: Record<string, string> = {
       'K-001': 'Khoa Nội',
@@ -435,7 +436,7 @@ export default function TransfersPage() {
   // Helper lấy họ tên người dùng từ mã hoặc email hoặc tên
   const getUserName = (idOrName?: string | null) => {
     if (!idOrName) return '';
-    const found = users.find(u => u.maNguoiDung === idOrName || u.email === idOrName || u.hoTen === idOrName);
+    const found = (users || []).find(u => u.maNguoiDung === idOrName || u.email === idOrName || u.hoTen === idOrName);
     if (found) return found.hoTen;
     const hardcodedUsers: Record<string, string> = {
       'ND-001': 'Nguyễn Văn Admin',

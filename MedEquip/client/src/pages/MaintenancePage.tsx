@@ -92,6 +92,7 @@ export default function MaintenancePage() {
   const [systemNotifs, setSystemNotifs] = useState<any[]>([]);
 
   const canManage = user?.vaiTro === 'ADMIN' || user?.vaiTro === 'QL_KHO' || user?.vaiTro === 'NV_KHO';
+  const isDeptRole = deptInfo.isDept || user?.vaiTro === 'TRUONG_KHOA' || user?.vaiTro === 'TRO_LY';
 
   const calculateNextDate = (baseDate: string, months: number) => {
     try {
@@ -971,10 +972,19 @@ export default function MaintenancePage() {
                                   Số Serial: <span className="font-mono text-foreground font-medium">{item.serialNumber}</span>
                                 </p>
                               )}
-                              <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1">
-                                <Hospital className="w-3.5 h-3.5 text-primary shrink-0" />
-                                <span className="font-medium text-foreground/90 truncate">{item.viTriHienTai}</span>
-                              </div>
+                              {isDeptRole ? (
+                                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1">
+                                  <span>Số lượng trong khoa:</span>
+                                  <span className="font-semibold text-primary">
+                                    {item.soLuongTaiKhoa ?? 1} {item.donViCoSo || 'Cái'}
+                                  </span>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1">
+                                  <Hospital className="w-3.5 h-3.5 text-primary shrink-0" />
+                                  <span className="font-medium text-foreground/90 truncate">{item.viTriHienTai}</span>
+                                </div>
+                              )}
                             </div>
                           </div>
 
@@ -1080,7 +1090,11 @@ export default function MaintenancePage() {
               <tr className="border-b bg-muted/40 text-muted-foreground font-semibold text-xs">
                 <th className="p-3.5 text-center w-12">STT</th>
                 <th className="p-3.5 text-left">Thiết bị y tế</th>
-                <th className="p-3.5 text-left">Vị trí hiện tại</th>
+                {isDeptRole ? (
+                  <th className="p-3.5 text-center">Số lượng trong khoa</th>
+                ) : (
+                  <th className="p-3.5 text-left">Vị trí hiện tại</th>
+                )}
                 <th className="p-3.5 text-center">Chu kỳ</th>
                 <th className="p-3.5 text-center">Bảo trì lần trước</th>
                 <th className="p-3.5 text-center">Hạn bảo trì lần tới</th>
@@ -1119,14 +1133,22 @@ export default function MaintenancePage() {
                       </div>
                     </td>
 
-                    <td className="p-3">
-                      <div className="flex items-center gap-1.5">
-                        <Hospital className={cn("w-3.5 h-3.5", item.dangSuDung ? "text-primary" : "text-muted-foreground")} />
-                        <span className={cn("text-xs font-medium", item.dangSuDung ? "text-primary" : "text-muted-foreground")}>
-                          {item.viTriHienTai}
+                    {isDeptRole ? (
+                      <td className="p-3 text-center">
+                        <span className="inline-flex items-center gap-1 font-semibold text-primary text-xs bg-primary/10 px-2.5 py-1 rounded-md border border-primary/20">
+                          {item.soLuongTaiKhoa ?? 1} {item.donViCoSo || 'Cái'}
                         </span>
-                      </div>
-                    </td>
+                      </td>
+                    ) : (
+                      <td className="p-3">
+                        <div className="flex items-center gap-1.5">
+                          <Hospital className={cn("w-3.5 h-3.5", item.dangSuDung ? "text-primary" : "text-muted-foreground")} />
+                          <span className={cn("text-xs font-medium", item.dangSuDung ? "text-primary" : "text-muted-foreground")}>
+                            {item.viTriHienTai}
+                          </span>
+                        </div>
+                      </td>
+                    )}
 
                     <td className="p-3 text-center font-medium text-xs">
                       {item.chuKyBaoTri} tháng/lần

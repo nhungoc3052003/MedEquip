@@ -2,14 +2,14 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { store } from '@/lib/store';
 import { apiCreateRequest, apiScanRequest, apiProcessRequestItems, apiMarkAllAsRead } from '@/lib/apiSync';
-import { PhieuYeuCauCapPhat, ThietBi, LoaiDeXuat } from '@/types';
+import { PhieuYeuCauCapPhat, ThietBi, LoaiDeXuat, NHOM_THIET_BI_MAP, detectNhomThietBiFrontend, NhomThietBi } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { toast } from '@/hooks/use-toast';
-import { Search, Check, CheckCheck, ShoppingCart, Plus, Minus, X, Trash2, Box, Camera, QrCode, RotateCcw, PackageCheck, ClipboardList, AlertCircle, Upload, Keyboard, Bell, Download, ImagePlus, FileText, Printer, ArrowRightLeft, ShoppingBag, Wrench, Layers, Send, CheckCircle2, Building2, Eye } from 'lucide-react';
+import { Search, Check, CheckCheck, ShoppingCart, Plus, Minus, X, Trash2, Box, Camera, QrCode, RotateCcw, PackageCheck, ClipboardList, AlertCircle, Upload, Keyboard, Bell, Download, ImagePlus, FileText, Printer, ArrowRightLeft, ShoppingBag, Wrench, Layers, Send, CheckCircle2, Building2, Eye, Stethoscope, Scissors, Zap, Package, Activity, PackagePlus } from 'lucide-react';
 import { fetchApi } from '@/services/api';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -69,6 +69,7 @@ const STATUS_COLORS = {
 
 const PROPOSAL_TYPE_MAP: Record<string, { label: string; badgeClass: string; icon: any }> = {
   CAP_PHAT: { label: 'Cấp phát kho', badgeClass: 'bg-blue-100 text-blue-700 border-blue-200', icon: ShoppingCart },
+  DE_XUAT_THEM: { label: 'Đề xuất nhập thêm', badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-200', icon: PackagePlus },
   DIEU_CHUYEN: { label: 'Điều chuyển khoa', badgeClass: 'bg-purple-100 text-purple-700 border-purple-200', icon: ArrowRightLeft },
   MUA_SAM: { label: 'Mua sắm mới', badgeClass: 'bg-amber-100 text-amber-700 border-amber-200', icon: ShoppingBag },
   BAO_HONG: { label: 'Báo hỏng sửa chữa', badgeClass: 'bg-rose-100 text-rose-700 border-rose-200', icon: Wrench }
@@ -77,14 +78,40 @@ const PROPOSAL_TYPE_MAP: Record<string, { label: string; badgeClass: string; ico
 export default function RequestsPage() {
   const { user } = useAuth();
   const [requests, setRequests] = useState(store.getRequests());
+  const [equipment, setEquipment] = useState<ThietBi[]>(() => store.getEquipment());
+  const [inventory, setInventory] = useState<TonKho[]>(() => store.getInventory());
   const [search, setSearch] = useState('');
   const [searchEq, setSearchEq] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [notifTrigger, setNotifTrigger] = useState(0);
 
   React.useEffect(() => {
     const handleNotifChange = () => setNotifTrigger(prev => prev + 1);
     window.addEventListener('store_notifications_changed', handleNotifChange);
     return () => window.removeEventListener('store_notifications_changed', handleNotifChange);
+  }, []);
+
+  React.useEffect(() => {
+    fetchApi<any[]>('/equipment').then(res => {
+      if (Array.isArray(res) && res.length > 0) {
+        store.setEquipment(res);
+        setEquipment(res);
+      }
+    }).catch(() => {});
+
+    fetchApi<any[]>('/inventory').then(res => {
+      if (Array.isArray(res)) {
+        store.setInventory(res);
+        setInventory(res);
+      }
+    }).catch(() => {});
+
+    fetchApi<any[]>('/requests').then(res => {
+      if (Array.isArray(res)) {
+        store.setRequests(res);
+        setRequests(res);
+      }
+    }).catch(() => {});
   }, []);
   
   // Trạng thái thông báo
@@ -100,31 +127,20 @@ export default function RequestsPage() {
 
   // Lọc tùy chỉnh & Lọc phân loại đề xuất
   const [filterDept, setFilterDept] = useState('all');
-  const [tabProposal, setTabProposal] = useState<'ALL' | 'CAP_PHAT' | 'MUA_SAM' | 'BAO_HONG'>('ALL');
+  const [tabProposal, setTabProposal] = useState<'ALL' | 'CAP_PHAT' | 'DE_XUAT_THEM'>('ALL');
 
-  // Modal tạo đề xuất mới
+  // Modal Đề xuất thêm (dành cho khoa khi cần số lượng lớn mà kho không đủ để kho nhập thêm)
   const [newProposalOpen, setNewProposalOpen] = useState(false);
-  const [proposalType, setProposalType] = useState<'MUA_SAM' | 'BAO_HONG'>('MUA_SAM');
-
-  // Dữ liệu cho Điều chuyển & Báo hỏng (lấy từ cá thể máy khoa đang giữ)
-  const [deptInstances, setDeptInstances] = useState<any[]>([]);
-  const [loadingDeptInstances, setLoadingDeptInstances] = useState(false);
-  const [transferInstance, setTransferInstance] = useState('');
-  const [transferDestDept, setTransferDestDept] = useState('');
-  const [transferReason, setTransferReason] = useState('');
-
-  // Dữ liệu cho Mua sắm mới
-  const [purchaseName, setPurchaseName] = useState('');
-  const [purchaseSpecs, setPurchaseSpecs] = useState('');
-  const [purchaseQty, setPurchaseQty] = useState(1);
-  const [purchaseUnit, setPurchaseUnit] = useState('Cái');
-  const [purchaseBudget, setPurchaseBudget] = useState<number | ''>('');
-  const [purchaseReason, setPurchaseReason] = useState('');
-
-  // Dữ liệu cho Báo hỏng
-  const [damageInstance, setDamageInstance] = useState('');
-  const [damagePriority, setDamagePriority] = useState<'BINH_THUONG' | 'KHAN_CAP'>('BINH_THUONG');
-  const [damageDescription, setDamageDescription] = useState('');
+  const [restockEquipment, setRestockEquipment] = useState('');
+  const [restockQty, setRestockQty] = useState(5);
+  const [restockUnit, setRestockUnit] = useState('Cái');
+  const [restockPriority, setRestockPriority] = useState<'BINH_THUONG' | 'KHAN_CAP'>('BINH_THUONG');
+  const [restockExpectedDate, setRestockExpectedDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    return d.toISOString().slice(0, 10);
+  });
+  const [restockReason, setRestockReason] = useState('');
 
   // Trạng thái giỏ hàng
   const [cartOpen, setCartOpen] = useState(false);
@@ -209,23 +225,45 @@ export default function RequestsPage() {
   // Trạng thái ảnh chứng minh cho NV Kho khi cấp phát
   const [proofImage, setProofImage] = useState<string | null>(null);
 
-  const equipment = store.getEquipment();
   const departments = store.getDepartments();
   const users = store.getUsers();
-  const inventory = store.getInventory();
-
   const isNvkho = user?.vaiTro === 'NV_KHO';
   const isQlKho = user?.vaiTro === 'QL_KHO';
   const isKhoa = user?.vaiTro === 'TRUONG_KHOA' || user?.vaiTro === 'TRO_LY';
   const isTroLy = user?.vaiTro === 'TRO_LY';
   const isTruongKhoa = user?.vaiTro === 'TRUONG_KHOA';
   const canDelete = user?.vaiTro === 'QL_KHO';
+  const isPureNvKho = isNvkho && !isQlKho && user?.vaiTro !== 'ADMIN';
+
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      ALL: equipment.filter(e => e.trangThai).length,
+      KHAM_BENH: 0,
+      PHAU_THUAT: 0,
+      CAP_CUU: 0,
+      VAT_TU_TIEU_HAO: 0,
+      KHAC: 0,
+    };
+    equipment.filter(e => e.trangThai).forEach(e => {
+      const cat = detectNhomThietBiFrontend(e);
+      counts[cat] = (counts[cat] || 0) + 1;
+    });
+    return counts;
+  }, [equipment]);
 
   const eqFiltered = useMemo(() => {
-    return equipment.filter(e =>
-      e.trangThai && (e.tenThietBi.toLowerCase().includes(searchEq.toLowerCase()) || e.maThietBi.toLowerCase().includes(searchEq.toLowerCase()))
-    );
-  }, [equipment, searchEq]);
+    return equipment.filter(e => {
+      if (!e.trangThai) return false;
+      const cat = detectNhomThietBiFrontend(e);
+      if (selectedCategory !== 'ALL' && cat !== selectedCategory) {
+        return false;
+      }
+      const matchSearch = !searchEq || 
+        e.tenThietBi.toLowerCase().includes(searchEq.toLowerCase()) || 
+        e.maThietBi.toLowerCase().includes(searchEq.toLowerCase());
+      return matchSearch;
+    });
+  }, [equipment, searchEq, selectedCategory]);
 
   const reqFiltered = useMemo(() => {
     let list = requests;
@@ -235,17 +273,22 @@ export default function RequestsPage() {
     }
 
     if (isQlKho && !isNvkho) {
-      // QL Kho chỉ thấy phiếu khi đã qua bước Trưởng Khoa
-      list = list.filter(r => ['CHO_QL_KHO_DUYET', 'DA_QL_KHO_DUYET', 'DA_CAP_PHAT', 'TU_CHOI'].includes(r.trangThai) && r.trangThai !== 'CHO_TRUONG_KHOA_DUYET');
+      // QL Kho thấy phiếu khi đã qua bước Trưởng Khoa, bao gồm cả phiếu Đã duyệt (DA_DUYET cho đề xuất thêm), Đã cấp phát, Hoàn thành, Từ chối...
+      list = list.filter(r => ['CHO_QL_KHO_DUYET', 'DA_QL_KHO_DUYET', 'DA_DUYET', 'HOAN_THANH', 'DA_CAP_PHAT', 'TU_CHOI'].includes(r.trangThai) && r.trangThai !== 'CHO_TRUONG_KHOA_DUYET');
     }
 
-    if (isNvkho && user?.vaiTro !== 'ADMIN') {
-      // NV Kho chỉ thấy phiếu khi đã qua bước QL Kho
-      list = list.filter(r => ['DA_QL_KHO_DUYET', 'DA_CAP_PHAT'].includes(r.trangThai));
+    if (isPureNvKho) {
+      // NV Kho chỉ thấy phiếu Cấp phát kho thông thường đã được QL Kho duyệt
+      list = list.filter(r => ['DA_QL_KHO_DUYET', 'DA_CAP_PHAT'].includes(r.trangThai) && (r.loaiDeXuat || 'CAP_PHAT') === 'CAP_PHAT');
     }
 
-    // Tách riêng luồng Điều chuyển sang trang chuyên biệt
-    list = list.filter(r => r.loaiDeXuat !== 'DIEU_CHUYEN');
+    // Tách riêng luồng Điều chuyển (ở trang Điều chuyển), Báo hỏng (ở trang Trả thiết bị), và Mua sắm mới
+    list = list.filter(r => r.loaiDeXuat !== 'DIEU_CHUYEN' && r.loaiDeXuat !== 'BAO_HONG' && r.loaiDeXuat !== 'MUA_SAM');
+
+    // Nếu là NV Kho thuần túy, ẩn hoàn toàn Đề xuất nhập thêm (không có vai trò)
+    if (isPureNvKho) {
+      list = list.filter(r => r.loaiDeXuat !== 'DE_XUAT_THEM');
+    }
 
     return list.filter(r => {
       const matchSearch = r.maPhieu.toLowerCase().includes(search.toLowerCase()) ||
@@ -256,7 +299,7 @@ export default function RequestsPage() {
       const matchProposal = tabProposal === 'ALL' || (r.loaiDeXuat || 'CAP_PHAT') === tabProposal;
       return matchSearch && matchDept && matchProposal;
     });
-  }, [requests, search, isTroLy, isTruongKhoa, isQlKho, isNvkho, user, filterDept, tabProposal]);
+  }, [requests, search, isTroLy, isTruongKhoa, isQlKho, isNvkho, isPureNvKho, user, filterDept, tabProposal]);
 
   // Xử lý logic giỏ hàng
   const addToCart = (tb: ThietBi) => {
@@ -267,7 +310,7 @@ export default function RequestsPage() {
       }
       return [...prev, { tb, soLuong: 1, donVi: tb.donViCoSo, ngayTraDuKien: '' }];
     });
-    toast({ title: 'Đã thêm vào giỏ', description: `${tb.tenThietBi}` });
+    toast({ title: 'Đã thêm vào danh sách đề xuất', description: `${tb.tenThietBi}` });
   };
 
   const updateCartQty = (id: string, qty: number) => {
@@ -284,7 +327,7 @@ export default function RequestsPage() {
   };
 
   const submitCart = async () => {
-    if (cart.length === 0) return toast({ title: 'Lỗi', description: 'Giỏ hàng rỗng.', variant: 'destructive' });
+    if (cart.length === 0) return toast({ title: 'Lỗi', description: 'Danh sách thiết bị đề xuất đang rỗng.', variant: 'destructive' });
     if (!khoaYeuCau && isKhoa && !departments.find(k => k.maKhoa === khoaYeuCau)) {
       toast({ title: 'Lỗi', description: 'Vui lòng chọn khoa của bạn hợp lệ.', variant: 'destructive' }); return;
     }
@@ -395,77 +438,55 @@ export default function RequestsPage() {
     }
   };
 
-  // Xử lý gửi Đề xuất Mua sắm mới
-  const handleSubmitPurchase = async () => {
-    if (!purchaseName.trim()) return toast({ title: 'Thiếu thông tin', description: 'Vui lòng nhập tên trang thiết bị cần mua sắm.', variant: 'destructive' });
-    if (!purchaseReason.trim()) return toast({ title: 'Thiếu thông tin', description: 'Vui lòng nhập lý do / sự cần thiết mua sắm.', variant: 'destructive' });
-    if (purchaseQty <= 0) return toast({ title: 'Không hợp lệ', description: 'Số lượng phải lớn hơn 0.', variant: 'destructive' });
-
-    try {
-      const res = await apiCreateRequest({
-        maNguoiYeuCau: user?.maNguoiDung,
-        maKhoa: user?.maKhoa || khoaYeuCau,
-        loaiDeXuat: 'MUA_SAM',
-        tenThietBiMoi: purchaseName,
-        quyCachKyThuat: purchaseSpecs,
-        soLuong: purchaseQty,
-        donViTinh: purchaseUnit,
-        duToanKinhPhi: typeof purchaseBudget === 'number' ? purchaseBudget : 0,
-        lyDo: purchaseReason,
-        items: [{
-          maThietBi: 'NEW_PURCHASE',
-          soLuong: purchaseQty,
-          donVi: purchaseUnit
-        }]
-      });
-
-      if (res.success) {
-        toast({ title: 'Thành công', description: 'Đã gửi tờ trình đề xuất mua sắm thiết bị mới.' });
-        setNewProposalOpen(false);
-        setPurchaseName('');
-        setPurchaseSpecs('');
-        setPurchaseQty(1);
-        setPurchaseBudget('');
-        setPurchaseReason('');
-        await refreshRequests();
-      } else {
-        toast({ title: 'Lỗi', description: res.message || 'Không thể tạo tờ trình.', variant: 'destructive' });
-      }
-    } catch (err: any) {
-      toast({ title: 'Lỗi', description: err.message, variant: 'destructive' });
+  // Xử lý gửi Đề xuất nhập thêm (khi kho không đủ số lượng thiết bị cho khoa)
+  const handleSubmitRestockProposal = async () => {
+    if (!restockEquipment) {
+      return toast({ title: 'Thiếu thông tin', description: 'Vui lòng chọn thiết bị / vật tư cần đề xuất nhập thêm.', variant: 'destructive' });
     }
-  };
+    if (restockQty <= 0) {
+      return toast({ title: 'Không hợp lệ', description: 'Số lượng đề xuất nhập thêm phải lớn hơn 0.', variant: 'destructive' });
+    }
+    if (!restockReason.trim()) {
+      return toast({ title: 'Thiếu thông tin', description: 'Vui lòng nhập lý do / giải trình nhu cầu lâm sàng cần nhập thêm.', variant: 'destructive' });
+    }
 
-  // Xử lý gửi Báo hỏng & Sửa chữa
-  const handleSubmitDamage = async () => {
-    if (!damageInstance) return toast({ title: 'Thiếu thông tin', description: 'Vui lòng chọn thiết bị gặp sự cố / hư hỏng.', variant: 'destructive' });
-    if (!damageDescription.trim()) return toast({ title: 'Thiếu thông tin', description: 'Vui lòng mô tả hiện trạng hư hỏng của máy.', variant: 'destructive' });
+    const selectedEq = equipment.find(e => e.maThietBi === restockEquipment);
+    const eqName = selectedEq?.tenThietBi || restockEquipment;
+    const dvt = restockUnit || selectedEq?.donViCoSo || 'Cái';
 
     try {
-      const selectedInst = deptInstances.find(i => i.maCaThe === damageInstance);
       const res = await apiCreateRequest({
         maNguoiYeuCau: user?.maNguoiDung,
         maKhoa: user?.maKhoa || khoaYeuCau,
-        loaiDeXuat: 'BAO_HONG',
-        maCaThe: damageInstance,
-        mucDoUuTien: damagePriority,
-        lyDo: damageDescription,
+        loaiDeXuat: 'DE_XUAT_THEM',
+        maThietBi: restockEquipment,
+        tenThietBiMoi: eqName,
+        soLuong: restockQty,
+        donViTinh: dvt,
+        mucDoUuTien: restockPriority,
+        ngayTraDuKien: restockExpectedDate,
+        lyDo: restockReason,
         items: [{
-          maThietBi: selectedInst?.maThietBi || 'TB',
-          soLuong: 1,
-          donVi: selectedInst?.donViCoSo || 'Cái'
+          maThietBi: restockEquipment,
+          tenThietBi: eqName,
+          soLuong: restockQty,
+          donVi: dvt,
+          ngayTraDuKien: restockExpectedDate
         }]
       });
 
       if (res.success) {
-        toast({ title: 'Thành công', description: 'Đã gửi biên bản báo hỏng và đề nghị bảo trì sửa chữa.' });
+        toast({ 
+          title: 'Đã gửi đề xuất nhập thêm thành công', 
+          description: `Đề xuất nhập thêm ${restockQty} ${dvt} "${eqName}" đã gửi đến Bộ phận Kho.`,
+        });
         setNewProposalOpen(false);
-        setDamageInstance('');
-        setDamageDescription('');
-        setDamagePriority('BINH_THUONG');
+        setRestockEquipment('');
+        setRestockQty(5);
+        setRestockReason('');
         await refreshRequests();
       } else {
-        toast({ title: 'Lỗi', description: res.message || 'Không thể tạo biên bản.', variant: 'destructive' });
+        toast({ title: 'Lỗi', description: res.message || 'Không thể gửi đề xuất.', variant: 'destructive' });
       }
     } catch (err: any) {
       toast({ title: 'Lỗi', description: err.message, variant: 'destructive' });
@@ -473,10 +494,17 @@ export default function RequestsPage() {
   };
 
   const refreshRequests = async () => {
-    const resList = await fetchApi<any[]>('/requests');
+    const [resList, resInv] = await Promise.all([
+      fetchApi<any[]>('/requests'),
+      fetchApi<any[]>('/inventory')
+    ]);
     if (Array.isArray(resList)) {
       store.setRequests(resList);
       setRequests(resList);
+    }
+    if (Array.isArray(resInv)) {
+      store.setInventory(resInv);
+      setInventory(resInv);
     }
   };
 
@@ -594,7 +622,7 @@ export default function RequestsPage() {
       const result = await response.json();
       if (result.success) {
         await refreshRequests();
-        toast({ title: 'Đã duyệt phiếu.' });
+        toast({ title: 'Đã xử lý phiếu', description: result.message || 'Đã duyệt phiếu.' });
       } else {
         toast({ title: 'Lỗi', description: result.message, variant: 'destructive' });
       }
@@ -726,7 +754,8 @@ export default function RequestsPage() {
             }
             .sig-box {
               text-align: center;
-              width: 32%;
+              flex: 1;
+              padding: 0 5px;
             }
             .sig-space {
               height: 70px;
@@ -773,7 +802,10 @@ export default function RequestsPage() {
       let titleText = 'GIAY DE NGHI CAP PHAT THIET BI Y TE';
       let subTitleText = '(Dung cho Tro ly / Khoa phong de nghi cap phat thiet bi y te)';
 
-      if (loai === 'DIEU_CHUYEN') {
+      if (loai === 'DE_XUAT_THEM') {
+        titleText = 'PHIEU DE NGHI BO SUNG TRANG THIET BI / NHAP THEM HANG';
+        subTitleText = '(Ap dung khi ton kho trung tam khong du dap ung nhu cau cua khoa)';
+      } else if (loai === 'DIEU_CHUYEN') {
         titleText = 'BIEN BAN DIEU CHUYEN TRANG THIET BI Y TE';
         subTitleText = '(Dieu chuyen trang thiet bi y te giua cac khoa phong noi vien)';
       } else if (loai === 'MUA_SAM') {
@@ -793,7 +825,13 @@ export default function RequestsPage() {
       doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
       doc.text(removeVietnameseTones(`Don vi de nghi / bao cao: ${tenKhoa}`), 14, 54);
-      if (loai === 'DIEU_CHUYEN') {
+      if (loai === 'DE_XUAT_THEM') {
+        doc.text(removeVietnameseTones(`Can bo de xuat (Tro ly): ${tenNguoiYeuCau}`), 14, 61);
+        doc.text(removeVietnameseTones(`Muc do uu tien: ${r.mucDoUuTien === 'KHAN_CAP' ? 'CAN GAP / KHAN' : 'Binh thuong'}`), 14, 68);
+        doc.text(removeVietnameseTones(`Ngay lap phieu: ${new Date(r.ngayTao).toLocaleString('vi-VN')}`), 14, 75);
+        doc.text(removeVietnameseTones(`Trang thai: ${STATUS_MAP[r.trangThai as keyof typeof STATUS_MAP] || r.trangThai}`), 14, 82);
+        doc.text(removeVietnameseTones(`Can cu & Ly do nhap them: ${r.lyDo || 'Ton kho khong du so luong can thiet'}`), 14, 89);
+      } else if (loai === 'DIEU_CHUYEN') {
         doc.text(removeVietnameseTones(`Don vi tiep nhan: ${tenKhoaNhan}`), 14, 61);
         doc.text(removeVietnameseTones(`Nguoi lap bien ban: ${tenNguoiYeuCau}`), 14, 68);
         doc.text(removeVietnameseTones(`Ngay yeu cau: ${new Date(r.ngayTao).toLocaleString('vi-VN')}`), 14, 75);
@@ -818,9 +856,21 @@ export default function RequestsPage() {
 
       let tableColumn: string[] = [];
       let tableRows: any[] = [];
-      const startTableY = loai === 'DIEU_CHUYEN' ? 95 : 88;
+      const startTableY = (loai === 'DIEU_CHUYEN' || loai === 'DE_XUAT_THEM') ? 95 : 88;
 
-      if (loai === 'DIEU_CHUYEN') {
+      if (loai === 'DE_XUAT_THEM') {
+        tableColumn = ["STT", "Ten Trang Thiet Bi / Vat Tu", "Ma Thiet Bi", "DVT", "SL De Xuat", "Uu Tien", "Thoi Han Can"].map(removeVietnameseTones);
+        const mainItem = r.items?.[0] || {};
+        tableRows.push([
+          "1",
+          removeVietnameseTones(mainItem.tenThietBi || r.tenThietBiMoi || r.maThietBi || 'Thiet bi'),
+          r.maThietBi || mainItem.maThietBi || '',
+          removeVietnameseTones(mainItem.donVi || mainItem.donViTinh || 'Cai'),
+          '+' + (r.soLuongYeuCau || mainItem.soLuong || 1),
+          removeVietnameseTones(r.mucDoUuTien === 'KHAN_CAP' ? 'Can gap' : 'Binh thuong'),
+          removeVietnameseTones(mainItem.ngayTraDuKien ? new Date(mainItem.ngayTraDuKien).toLocaleDateString('vi-VN') : 'Som nhat')
+        ]);
+      } else if (loai === 'DIEU_CHUYEN') {
         tableColumn = ["STT", "Ten Thiet Bi Y Te", "Ma Ca The", "Khoa Giao", "Khoa Nhan", "Tinh Trang Ban Giao"].map(removeVietnameseTones);
         tableRows.push([
           "1",
@@ -873,7 +923,7 @@ export default function RequestsPage() {
         body: tableRows,
         startY: startTableY,
         styles: { fontSize: 9, cellPadding: 3 },
-        headStyles: { fillColor: [41, 128, 185], textColor: 255, halign: 'center' }
+        headStyles: { fillColor: loai === 'DE_XUAT_THEM' ? [16, 149, 106] : [41, 128, 185], textColor: 255, halign: 'center' }
       });
 
       const finalY = (doc as any).lastAutoTable.finalY + 14;
@@ -889,7 +939,23 @@ export default function RequestsPage() {
       doc.setFontSize(10);
       doc.setFont('helvetica', 'bold');
 
-      if (loai === 'DIEU_CHUYEN') {
+      if (loai === 'DE_XUAT_THEM') {
+        doc.text(removeVietnameseTones('NGUOI DE XUAT'), 30, finalY + 8, { align: 'center' });
+        doc.text(removeVietnameseTones('TRUONG KHOA'), 75, finalY + 8, { align: 'center' });
+        doc.text(removeVietnameseTones('BO PHAN KHO'), 125, finalY + 8, { align: 'center' });
+        doc.text(removeVietnameseTones('BAN GIAM DOC / VAT TU'), 175, finalY + 8, { align: 'center' });
+
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 30, finalY + 13, { align: 'center' });
+        doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 75, finalY + 13, { align: 'center' });
+        doc.text(removeVietnameseTones('(Tiep nhan)'), 125, finalY + 13, { align: 'center' });
+        doc.text(removeVietnameseTones('(Phe duyet)'), 175, finalY + 13, { align: 'center' });
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text(removeVietnameseTones(tenNguoiYeuCau), 30, finalY + 36, { align: 'center' });
+      } else if (loai === 'DIEU_CHUYEN') {
         doc.text(removeVietnameseTones('DAI DIEN KHOA GIAO'), 35, finalY + 8, { align: 'center' });
         doc.setFont('helvetica', 'italic');
         doc.setFontSize(8);
@@ -1010,9 +1076,12 @@ export default function RequestsPage() {
         doc.text(removeVietnameseTones('Doc lap - Tu do - Hanh phuc'), 196, 21, { align: 'right' });
         doc.line(135, 23, 196, 23);
 
-        doc.setFontSize(15);
+        const isRestock = r.loaiDeXuat === 'DE_XUAT_THEM';
+        const formTitle = isRestock ? 'PHIEU DE XUAT NHAP THEM THIET BI - VAT TU Y TE' : 'GIAY DE NGHI CAP PHAT THIET BI Y TE';
+
+        doc.setFontSize(14);
         doc.setFont('helvetica', 'bold');
-        doc.text(removeVietnameseTones('GIAY DE NGHI CAP PHAT THIET BI Y TE'), 105, 38, { align: 'center' });
+        doc.text(removeVietnameseTones(formTitle), 105, 38, { align: 'center' });
         
         doc.setFontSize(10);
         doc.setFont('helvetica', 'normal');
@@ -1021,7 +1090,10 @@ export default function RequestsPage() {
         doc.text(removeVietnameseTones(`Ngay yeu cau: ${new Date(r.ngayTao).toLocaleString('vi-VN')}`), 14, 66);
         doc.text(removeVietnameseTones(`Ly do: ${r.lyDo || '---'}`), 14, 73);
 
-        const tableColumn = ["STT", "Ma TB", "Ten Thiet Bi Y Te", "DVT", "SL De Nghi", "Ghi Chu"].map(removeVietnameseTones);
+        const tableColumn = (isRestock 
+          ? ["STT", "Ma TB", "Ten Thiet Bi Y Te", "DVT", "SL De Xuat Them", "Uu Tien"] 
+          : ["STT", "Ma TB", "Ten Thiet Bi Y Te", "DVT", "SL De Nghi", "Ghi Chu"]
+        ).map(removeVietnameseTones);
         const tableRows: any[] = [];
         
         if (r.items && r.items.length > 0) {
@@ -1032,11 +1104,11 @@ export default function RequestsPage() {
               removeVietnameseTones(item.tenThietBi || item.maThietBi),
               removeVietnameseTones(item.donVi || item.donViTinh || 'Cai'),
               item.soLuongCoSo ? item.soLuongCoSo.toString() : (item.soLuong?.toString() || '1'),
-              removeVietnameseTones(item.ghiChu || '')
+              removeVietnameseTones(isRestock ? (r.mucDoUuTien === 'KHAN_CAP' ? 'Can gap' : 'Binh thuong') : (item.ghiChu || ''))
             ]);
           });
         } else {
-          tableRows.push(["1", r.maThietBi || '', removeVietnameseTones(r.tenThietBi || ''), 'Cai', r.soLuongYeuCau?.toString() || '1', '']);
+          tableRows.push(["1", r.maThietBi || '', removeVietnameseTones(r.tenThietBi || ''), 'Cai', r.soLuongYeuCau?.toString() || '1', isRestock ? (r.mucDoUuTien === 'KHAN_CAP' ? 'Can gap' : 'Binh thuong') : '']);
         }
 
         autoTable(doc, {
@@ -1044,7 +1116,7 @@ export default function RequestsPage() {
           body: tableRows,
           startY: 80,
           styles: { fontSize: 9, cellPadding: 3 },
-          headStyles: { fillColor: [41, 128, 185], textColor: 255, halign: 'center' },
+          headStyles: { fillColor: isRestock ? [16, 149, 106] : [41, 128, 185], textColor: 255, halign: 'center' },
           columnStyles: {
             0: { halign: 'center', cellWidth: 12 },
             1: { halign: 'center', cellWidth: 25 },
@@ -1081,7 +1153,7 @@ export default function RequestsPage() {
 
         doc.setFontSize(10);
         doc.setFont('helvetica', 'bold');
-        doc.text(removeVietnameseTones('KHO CAP PHAT'), 175, finalY + 8, { align: 'center' });
+        doc.text(removeVietnameseTones(isRestock ? 'QL KHO TIEP NHAN' : 'KHO CAP PHAT'), 175, finalY + 8, { align: 'center' });
         doc.setFont('helvetica', 'italic');
         doc.setFontSize(8);
         doc.text(removeVietnameseTones('(Ky, ghi ro ho ten)'), 175, finalY + 13, { align: 'center' });
@@ -1127,23 +1199,23 @@ export default function RequestsPage() {
             )}
           </Button>
 
-          {/* Nút Tạo đề xuất mới dành cho Trợ lý khoa hoặc Khoa */}
+          {/* Nút Đề xuất thêm dành cho Trợ lý khoa hoặc Khoa (khi kho không đủ thiết bị) */}
           {isKhoa && (
             <Button
               onClick={() => {
                 setNewProposalOpen(true);
-                loadDeptInstances();
               }}
               className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-md mr-2 flex items-center gap-1.5"
+              title="Gửi đề xuất đến Kho để nhập thêm thiết bị khi số lượng trong kho không đủ"
             >
-              <Plus className="w-4 h-4" />
-              <span>Tạo đề xuất mới</span>
+              <PackagePlus className="w-4 h-4" />
+              <span>Đề xuất thêm</span>
             </Button>
           )}
 
           {isTroLy && (
             <Button onClick={() => setCartOpen(true)} className="gradient-primary text-primary-foreground shadow-md mr-2 relative">
-              <ShoppingCart className="w-4 h-4 mr-2" /> Giỏ hàng cấp phát
+              <ClipboardList className="w-4 h-4 mr-2" /> Thiết bị đề xuất
               {cart.length > 0 && (
                 <span className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full animate-in zoom-in">
                   {cart.length}
@@ -1154,51 +1226,236 @@ export default function RequestsPage() {
         </div>
 
         {isTroLy && (
-          <TabsContent value="catalog" className="mt-0">
-            <div className="flex items-center mb-4">
-              <div className="relative max-w-sm w-full shadow-sm">
+          <TabsContent value="catalog" className="mt-0 space-y-4">
+            {/* Thanh Tab phân loại chuyên mục thiết bị */}
+            <div className="flex flex-wrap items-center gap-2.5 pb-1">
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('ALL')}
+                className={cn(
+                  "flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap border shadow-2xs cursor-pointer",
+                  selectedCategory === 'ALL'
+                    ? "bg-primary text-primary-foreground border-primary shadow-sm ring-2 ring-primary/20"
+                    : "bg-card text-muted-foreground hover:bg-muted/70 hover:text-foreground border-border"
+                )}
+              >
+                <Layers className="w-4 h-4" />
+                <span>Tất cả thiết bị</span>
+                <span className={cn(
+                  "px-1.5 py-0.5 rounded-full text-[10px] font-bold",
+                  selectedCategory === 'ALL' ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"
+                )}>
+                  {categoryCounts.ALL}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('KHAM_BENH')}
+                className={cn(
+                  "flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap border shadow-2xs cursor-pointer",
+                  selectedCategory === 'KHAM_BENH'
+                    ? "bg-sky-600 text-white border-sky-600 shadow-sm ring-2 ring-sky-500/20"
+                    : "bg-card text-muted-foreground hover:bg-sky-50/70 hover:text-sky-700 border-border"
+                )}
+              >
+                <Stethoscope className={cn("w-4 h-4", selectedCategory === 'KHAM_BENH' ? "text-white" : "text-sky-500")} />
+                <span>Khám & Chẩn đoán</span>
+                <span className={cn(
+                  "px-1.5 py-0.5 rounded-full text-[10px] font-bold",
+                  selectedCategory === 'KHAM_BENH' ? "bg-white/20 text-white" : "bg-sky-100 text-sky-700"
+                )}>
+                  {categoryCounts.KHAM_BENH}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('PHAU_THUAT')}
+                className={cn(
+                  "flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap border shadow-2xs cursor-pointer",
+                  selectedCategory === 'PHAU_THUAT'
+                    ? "bg-violet-600 text-white border-violet-600 shadow-sm ring-2 ring-violet-500/20"
+                    : "bg-card text-muted-foreground hover:bg-violet-50/70 hover:text-violet-700 border-border"
+                )}
+              >
+                <Scissors className={cn("w-4 h-4", selectedCategory === 'PHAU_THUAT' ? "text-white" : "text-violet-500")} />
+                <span>Phẫu thuật & Ngoại khoa</span>
+                <span className={cn(
+                  "px-1.5 py-0.5 rounded-full text-[10px] font-bold",
+                  selectedCategory === 'PHAU_THUAT' ? "bg-white/20 text-white" : "bg-violet-100 text-violet-700"
+                )}>
+                  {categoryCounts.PHAU_THUAT}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('CAP_CUU')}
+                className={cn(
+                  "flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap border shadow-2xs cursor-pointer",
+                  selectedCategory === 'CAP_CUU'
+                    ? "bg-rose-600 text-white border-rose-600 shadow-sm ring-2 ring-rose-500/20"
+                    : "bg-card text-muted-foreground hover:bg-rose-50/70 hover:text-rose-700 border-border"
+                )}
+              >
+                <Zap className={cn("w-4 h-4", selectedCategory === 'CAP_CUU' ? "text-white" : "text-rose-500")} />
+                <span>Cấp cứu & Hồi sức (ICU)</span>
+                <span className={cn(
+                  "px-1.5 py-0.5 rounded-full text-[10px] font-bold",
+                  selectedCategory === 'CAP_CUU' ? "bg-white/20 text-white" : "bg-rose-100 text-rose-700"
+                )}>
+                  {categoryCounts.CAP_CUU}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('VAT_TU_TIEU_HAO')}
+                className={cn(
+                  "flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap border shadow-2xs cursor-pointer",
+                  selectedCategory === 'VAT_TU_TIEU_HAO'
+                    ? "bg-emerald-600 text-white border-emerald-600 shadow-sm ring-2 ring-emerald-500/20"
+                    : "bg-card text-muted-foreground hover:bg-emerald-50/70 hover:text-emerald-700 border-border"
+                )}
+              >
+                <Package className={cn("w-4 h-4", selectedCategory === 'VAT_TU_TIEU_HAO' ? "text-white" : "text-emerald-500")} />
+                <span>Vật tư y tế tiêu hao</span>
+                <span className={cn(
+                  "px-1.5 py-0.5 rounded-full text-[10px] font-bold",
+                  selectedCategory === 'VAT_TU_TIEU_HAO' ? "bg-white/20 text-white" : "bg-emerald-100 text-emerald-700"
+                )}>
+                  {categoryCounts.VAT_TU_TIEU_HAO}
+                </span>
+              </button>
+
+              {categoryCounts.KHAC > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategory('KHAC')}
+                  className={cn(
+                    "flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap border shadow-2xs cursor-pointer",
+                    selectedCategory === 'KHAC'
+                      ? "bg-slate-700 text-white border-slate-700 shadow-sm ring-2 ring-slate-500/20"
+                      : "bg-card text-muted-foreground hover:bg-slate-50/70 hover:text-slate-700 border-border"
+                  )}
+                >
+                  <Box className="w-4 h-4 text-slate-500" />
+                  <span>Dụng cụ khác</span>
+                  <span className={cn(
+                    "px-1.5 py-0.5 rounded-full text-[10px] font-bold",
+                    selectedCategory === 'KHAC' ? "bg-white/20 text-white" : "bg-slate-100 text-slate-700"
+                  )}>
+                    {categoryCounts.KHAC}
+                  </span>
+                </button>
+              )}
+            </div>
+
+            {/* Thanh tìm kiếm & thống kê kết quả */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="relative max-w-sm w-full shadow-2xs">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input placeholder="Tìm thiết bị trong kho..." value={searchEq} onChange={e => setSearchEq(e.target.value)} className="pl-10" />
+                <Input
+                  placeholder={`Tìm thiết bị trong ${selectedCategory === 'ALL' ? 'kho' : NHOM_THIET_BI_MAP[selectedCategory as NhomThietBi]?.shortLabel || 'mục này'}...`}
+                  value={searchEq}
+                  onChange={e => setSearchEq(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+
+              <div className="text-xs text-muted-foreground flex items-center gap-2">
+                <span>
+                  Đang hiển thị <strong className="text-foreground">{eqFiltered.length}</strong> thiết bị
+                  {selectedCategory !== 'ALL' && (
+                    <> thuộc <span className="font-semibold text-primary">{NHOM_THIET_BI_MAP[selectedCategory as NhomThietBi]?.label}</span></>
+                  )}
+                </span>
+                {(selectedCategory !== 'ALL' || searchEq) && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => { setSelectedCategory('ALL'); setSearchEq(''); }}
+                    className="h-7 text-xs text-primary hover:underline px-2"
+                  >
+                    Xem tất cả ({categoryCounts.ALL})
+                  </Button>
+                )}
               </div>
             </div>
 
+            {/* Lưới thẻ thiết bị */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
               {eqFiltered.map(tb => {
                 const maxKho = inventory.find(i => i.maThietBi === tb.maThietBi)?.soLuongKho || 0;
+                const cat = detectNhomThietBiFrontend(tb);
+                const catMeta = NHOM_THIET_BI_MAP[cat];
+
                 return (
-                  <div key={tb.maThietBi} className="bg-card border rounded-xl overflow-hidden hover:shadow-lg transition-all group flex flex-col">
+                  <div key={tb.maThietBi} className="bg-card border rounded-xl overflow-hidden hover:shadow-lg transition-all group flex flex-col hover:border-primary/40">
                     <div className="aspect-square bg-muted/30 relative flex border-b">
                       {tb.hinhAnh ? (
-                        <img src={tb.hinhAnh} className="object-cover w-full h-full" alt={tb.tenThietBi} />
+                        <img src={tb.hinhAnh} className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-300" alt={tb.tenThietBi} />
                       ) : (
                         <div className="m-auto text-muted-foreground flex flex-col items-center gap-2">
                           <Box className="w-12 h-12 opacity-20" />
                         </div>
                       )}
-                      <div className="absolute top-2 right-2">
-                        <span className={`px-2 py-1 rounded-md text-[10px] font-bold shadow-sm ${maxKho > 0 ? 'bg-success text-success-foreground' : 'bg-destructive text-destructive-foreground'}`}>
+
+                      {/* Huy hiệu phân mục góc trên trái */}
+                      <div className="absolute top-2 left-2 z-10">
+                        <span className={cn("px-2 py-0.5 rounded-md text-[10px] font-bold shadow-xs border backdrop-blur-xs", catMeta.badgeClass)}>
+                          {catMeta.shortLabel}
+                        </span>
+                      </div>
+
+                      {/* Huy hiệu số lượng tồn kho góc trên phải */}
+                      <div className="absolute top-2 right-2 z-10">
+                        <span className={`px-2 py-1 rounded-md text-[10px] font-bold shadow-xs ${maxKho > 0 ? 'bg-success text-success-foreground' : 'bg-destructive text-destructive-foreground'}`}>
                           Tồn: {maxKho}
                         </span>
                       </div>
                     </div>
                     <div className="p-3 flex-1 flex flex-col">
                       <h4 className="font-bold text-sm line-clamp-1 mb-1 group-hover:text-primary transition-colors" title={tb.tenThietBi}>{tb.tenThietBi}</h4>
-                      <p className="text-[10px] font-mono text-muted-foreground mb-2">{tb.maThietBi} • {tb.loaiThietBi === 'TAI_SU_DUNG' ? 'Tái sử dụng' : 'Khấu hao'}</p>
+                      <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground mb-2">
+                        <span>{tb.maThietBi}</span>
+                        <span>•</span>
+                        <span className="font-medium">{tb.loaiThietBi === 'TAI_SU_DUNG' ? 'Tái sử dụng' : 'Khấu hao'}</span>
+                      </div>
                       <div className="mt-auto pt-2">
                         <Button
                           onClick={() => addToCart(tb)}
                           disabled={maxKho <= 0}
-                          className="w-full text-xs h-8"
-                          variant={maxKho > 0 ? 'default' : 'secondary'}
+                          className="w-full text-xs h-8 cursor-pointer"
+                          variant={maxKho > 0 ? (cart.some(c => c.tb.maThietBi === tb.maThietBi) ? 'secondary' : 'default') : 'outline'}
                         >
-                          {maxKho > 0 ? (cart.some(c => c.tb.maThietBi === tb.maThietBi) ? 'Thêm tiếp' : 'Thêm vào giỏ') : 'Hết hàng'}
+                          {maxKho > 0 ? (cart.some(c => c.tb.maThietBi === tb.maThietBi) ? '✓ Thêm tiếp' : '+ Chọn đề xuất') : 'Hết hàng'}
                         </Button>
                       </div>
                     </div>
                   </div>
-                )
+                );
               })}
-              {eqFiltered.length === 0 && <div className="col-span-full text-center py-12 text-muted-foreground">Không tìm thấy thiết bị nào trong kho.</div>}
+              {eqFiltered.length === 0 && (
+                <div className="col-span-full text-center py-16 bg-muted/20 rounded-xl border border-dashed">
+                  <Box className="w-12 h-12 mx-auto text-muted-foreground/40 mb-3" />
+                  <p className="text-sm font-medium text-foreground">Không tìm thấy thiết bị nào</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Thử tìm từ khóa khác hoặc chuyển sang phân mục thiết bị khác
+                  </p>
+                  {(selectedCategory !== 'ALL' || searchEq) && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => { setSelectedCategory('ALL'); setSearchEq(''); }}
+                      className="mt-3 text-xs"
+                    >
+                      Xóa bộ lọc để xem tất cả
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
           </TabsContent>
         )}
@@ -1212,7 +1469,12 @@ export default function RequestsPage() {
               className={cn("h-8 text-xs rounded-lg font-medium", tabProposal === 'ALL' ? "bg-primary text-primary-foreground font-semibold shadow-xs" : "text-muted-foreground")}
               onClick={() => setTabProposal('ALL')}
             >
-              Tất cả ({requests.filter(r => r.loaiDeXuat !== 'DIEU_CHUYEN').length})
+              Tất cả ({requests.filter(r => {
+                if (isPureNvKho) return ['DA_QL_KHO_DUYET', 'DA_CAP_PHAT'].includes(r.trangThai) && (r.loaiDeXuat || 'CAP_PHAT') === 'CAP_PHAT';
+                if (isTroLy || isTruongKhoa) return r.maKhoa === user?.maKhoa && r.loaiDeXuat !== 'DIEU_CHUYEN' && r.loaiDeXuat !== 'BAO_HONG' && r.loaiDeXuat !== 'MUA_SAM';
+                if (isQlKho) return ['CHO_QL_KHO_DUYET', 'DA_QL_KHO_DUYET', 'DA_DUYET', 'HOAN_THANH', 'DA_CAP_PHAT', 'TU_CHOI'].includes(r.trangThai) && r.loaiDeXuat !== 'DIEU_CHUYEN' && r.loaiDeXuat !== 'BAO_HONG' && r.loaiDeXuat !== 'MUA_SAM';
+                return r.loaiDeXuat !== 'DIEU_CHUYEN' && r.loaiDeXuat !== 'BAO_HONG' && r.loaiDeXuat !== 'MUA_SAM';
+              }).length})
             </Button>
             <Button
               variant={tabProposal === 'CAP_PHAT' ? 'default' : 'ghost'}
@@ -1221,26 +1483,30 @@ export default function RequestsPage() {
               onClick={() => setTabProposal('CAP_PHAT')}
             >
               <ShoppingCart className="w-3.5 h-3.5" />
-              Cấp phát kho ({requests.filter(r => (r.loaiDeXuat || 'CAP_PHAT') === 'CAP_PHAT').length})
+              Cấp phát kho ({requests.filter(r => {
+                if ((r.loaiDeXuat || 'CAP_PHAT') !== 'CAP_PHAT') return false;
+                if (isPureNvKho) return ['DA_QL_KHO_DUYET', 'DA_CAP_PHAT'].includes(r.trangThai);
+                if (isTroLy || isTruongKhoa) return r.maKhoa === user?.maKhoa;
+                if (isQlKho) return ['CHO_QL_KHO_DUYET', 'DA_QL_KHO_DUYET', 'DA_DUYET', 'HOAN_THANH', 'DA_CAP_PHAT', 'TU_CHOI'].includes(r.trangThai);
+                return true;
+              }).length})
             </Button>
-            <Button
-              variant={tabProposal === 'MUA_SAM' ? 'default' : 'ghost'}
-              size="sm"
-              className={cn("h-8 text-xs rounded-lg font-medium gap-1.5", tabProposal === 'MUA_SAM' ? "bg-amber-600 text-white font-semibold shadow-xs" : "text-muted-foreground")}
-              onClick={() => setTabProposal('MUA_SAM')}
-            >
-              <ShoppingBag className="w-3.5 h-3.5" />
-              Mua sắm mới ({requests.filter(r => r.loaiDeXuat === 'MUA_SAM').length})
-            </Button>
-            <Button
-              variant={tabProposal === 'BAO_HONG' ? 'default' : 'ghost'}
-              size="sm"
-              className={cn("h-8 text-xs rounded-lg font-medium gap-1.5", tabProposal === 'BAO_HONG' ? "bg-rose-600 text-white font-semibold shadow-xs" : "text-muted-foreground")}
-              onClick={() => setTabProposal('BAO_HONG')}
-            >
-              <Wrench className="w-3.5 h-3.5" />
-              Báo hỏng ({requests.filter(r => r.loaiDeXuat === 'BAO_HONG').length})
-            </Button>
+            {!isPureNvKho && (
+              <Button
+                variant={tabProposal === 'DE_XUAT_THEM' ? 'default' : 'ghost'}
+                size="sm"
+                className={cn("h-8 text-xs rounded-lg font-medium gap-1.5", tabProposal === 'DE_XUAT_THEM' ? "bg-emerald-600 text-white font-semibold shadow-xs" : "text-muted-foreground")}
+                onClick={() => setTabProposal('DE_XUAT_THEM')}
+              >
+                <PackagePlus className="w-3.5 h-3.5" />
+                Đề xuất nhập thêm ({requests.filter(r => {
+                  if (r.loaiDeXuat !== 'DE_XUAT_THEM') return false;
+                  if (isTroLy || isTruongKhoa) return r.maKhoa === user?.maKhoa;
+                  if (isQlKho) return ['CHO_QL_KHO_DUYET', 'DA_QL_KHO_DUYET', 'DA_DUYET', 'HOAN_THANH', 'DA_CAP_PHAT', 'TU_CHOI'].includes(r.trangThai);
+                  return true;
+                }).length})
+              </Button>
+            )}
           </div>
 
           <div className="flex gap-3 mb-4 flex-wrap items-center">
@@ -1332,7 +1598,22 @@ export default function RequestsPage() {
                         </td>
                         <td className="p-3 font-medium text-xs">{khoa?.tenKhoa || r.maKhoa}</td>
                         <td className="p-3">
-                          {loai === 'DIEU_CHUYEN' ? (
+                          {loai === 'DE_XUAT_THEM' ? (
+                            <div>
+                              <div className="font-semibold text-emerald-950 flex items-center gap-1.5">
+                                <span>{mainItem.tenThietBi || r.tenThietBiMoi || r.maThietBi}</span>
+                                <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-medium border border-emerald-200">Kho nhập thêm</span>
+                              </div>
+                              <div className="text-[11px] text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 w-fit mt-1 flex items-center gap-2 font-medium">
+                                <span>Đề xuất: <strong>{r.soLuongYeuCau || mainItem.soLuong || 1} {mainItem.donViTinh || mainItem.donVi || 'Cái'}</strong></span>
+                                <span>•</span>
+                                <span className={r.mucDoUuTien === 'KHAN_CAP' ? 'text-destructive font-bold' : 'text-muted-foreground'}>
+                                  {r.mucDoUuTien === 'KHAN_CAP' ? '🚨 Cần gấp' : 'Bình thường'}
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-muted-foreground truncate max-w-xs mt-0.5 italic">Lý do: "{r.lyDo}"</div>
+                            </div>
+                          ) : loai === 'DIEU_CHUYEN' ? (
                             <div>
                               <div className="font-semibold text-foreground">{mainItem.tenThietBi}</div>
                               <div className="text-[11px] font-mono text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200 w-fit mt-1 flex items-center gap-1">
@@ -1340,27 +1621,6 @@ export default function RequestsPage() {
                                 <span>➔ Đến: <strong>{departments.find(d => d.maKhoa === r.maKhoaNhan)?.tenKhoa || r.maKhoaNhan}</strong></span>
                               </div>
                               <div className="text-[10px] text-muted-foreground truncate max-w-xs mt-0.5">{r.lyDo}</div>
-                            </div>
-                          ) : loai === 'MUA_SAM' ? (
-                            <div>
-                              <div className="font-semibold text-amber-900">{r.tenThietBiMoi || 'Thiết bị mua sắm mới'}</div>
-                              {r.quyCachKyThuat && <div className="text-[10px] text-muted-foreground truncate max-w-xs">{r.quyCachKyThuat}</div>}
-                              <div className="text-[11px] text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 w-fit mt-1 font-medium">
-                                Dự toán: {r.duToanKinhPhi ? r.duToanKinhPhi.toLocaleString('vi-VN') + ' đ' : 'Chưa có'}
-                              </div>
-                              <div className="text-[10px] text-muted-foreground truncate max-w-xs mt-0.5">{r.lyDo}</div>
-                            </div>
-                          ) : loai === 'BAO_HONG' ? (
-                            <div>
-                              <div className="font-semibold text-rose-900">{mainItem.tenThietBi}</div>
-                              <div className="text-[11px] text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200 w-fit mt-1 flex items-center gap-1.5 font-medium">
-                                <span>Máy: <strong>{r.maCaThe}</strong></span>
-                                <span>•</span>
-                                <span className={r.mucDoUuTien === 'KHAN_CAP' ? 'text-destructive font-bold' : ''}>
-                                  {r.mucDoUuTien === 'KHAN_CAP' ? '🚨 Khẩn cấp' : 'Ưu tiên bình thường'}
-                                </span>
-                              </div>
-                              <div className="text-[10px] text-muted-foreground truncate max-w-xs mt-0.5 italic">"{r.lyDo}"</div>
                             </div>
                           ) : (
                             <div>
@@ -1372,18 +1632,28 @@ export default function RequestsPage() {
                           )}
                         </td>
                         <td className="p-3 text-center">
-                          {loai === 'MUA_SAM' ? (
-                            <span className="font-bold text-sm text-amber-700">{r.soLuongYeuCau || 1} {r.items?.[0]?.donVi || 'Cái'}</span>
-                          ) : loai === 'DIEU_CHUYEN' || loai === 'BAO_HONG' ? (
+                          {loai === 'DE_XUAT_THEM' ? (
+                            <span className="font-bold text-sm text-emerald-700">+{r.soLuongYeuCau || 1} {mainItem.donViTinh || mainItem.donVi || 'Cái'}</span>
+                          ) : loai === 'DIEU_CHUYEN' ? (
                             <span className="font-bold text-sm text-foreground">1 Máy</span>
                           ) : (
                             <span className="font-bold text-sm text-primary">{itemCount} TB</span>
                           )}
                         </td>
                         <td className="p-3 text-center">
-                          <span className={cn(`px-3 py-1 rounded-full text-[10px] uppercase font-bold border`, STATUS_COLORS[r.trangThai as keyof typeof STATUS_COLORS] || 'bg-muted')}>
-                            {r.trangThai === 'DA_HUY' ? 'Đã hủy' : (STATUS_MAP[r.trangThai as keyof typeof STATUS_MAP] || r.trangThai)}
-                          </span>
+                          {loai === 'DE_XUAT_THEM' && r.trangThai === 'DA_DUYET' ? (
+                            <span className="px-3 py-1 rounded-full text-[10px] uppercase font-bold border bg-emerald-100 text-emerald-800 border-emerald-300">
+                              Đã duyệt (Chờ nhập hàng)
+                            </span>
+                          ) : loai === 'DE_XUAT_THEM' && r.trangThai === 'HOAN_THANH' ? (
+                            <span className="px-3 py-1 rounded-full text-[10px] uppercase font-bold border bg-green-100 text-green-800 border-green-300">
+                              Đã về hàng (Kho đủ)
+                            </span>
+                          ) : (
+                            <span className={cn(`px-3 py-1 rounded-full text-[10px] uppercase font-bold border`, STATUS_COLORS[r.trangThai as keyof typeof STATUS_COLORS] || 'bg-muted')}>
+                              {r.trangThai === 'DA_HUY' ? 'Đã hủy' : (STATUS_MAP[r.trangThai as keyof typeof STATUS_MAP] || r.trangThai)}
+                            </span>
+                          )}
                           {isNvkho && r.trangThai === 'DA_HUY' && (
                             <div className="text-[10px] text-destructive mt-2 font-medium italic">Phiếu yêu cầu đã bị hủy bởi người yêu cầu</div>
                           )}
@@ -1412,6 +1682,30 @@ export default function RequestsPage() {
                           {isQlKho && r.trangThai === 'CHO_QL_KHO_DUYET' && (
                             <Button size="sm" className="gradient-primary text-white text-xs h-8 mr-2" onClick={(e) => { e.stopPropagation(); startProcessing(r.maPhieu); }}>
                               Xử lý duyệt
+                            </Button>
+                          )}
+                          {isQlKho && loai === 'DE_XUAT_THEM' && r.trangThai === 'DA_DUYET' && (
+                            <Button
+                              size="sm"
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8 mr-2 inline-flex items-center gap-1 font-semibold shadow-xs"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                try {
+                                  const res = await fetchApi<any>(`/requests/${r.maPhieu}/complete-restock`, { method: 'PUT' });
+                                  if (res && res.success) {
+                                    toast({ title: 'Hoàn tất đề xuất', description: 'Đã xác nhận hàng đã về kho và thông báo cho Trợ lý khoa.' });
+                                    await refreshRequests();
+                                  } else {
+                                    toast({ title: 'Lỗi', description: res?.message || 'Không thể hoàn tất', variant: 'destructive' });
+                                  }
+                                } catch (err: any) {
+                                  toast({ title: 'Lỗi', description: err.message, variant: 'destructive' });
+                                }
+                              }}
+                              title="Xác nhận hàng đã nhập về kho để Trợ lý khoa có thể tạo yêu cầu cấp phát"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Xác nhận đã về hàng</span>
                             </Button>
                           )}
                           {isNvkho && r.trangThai === 'DA_QL_KHO_DUYET' && loai === 'CAP_PHAT' && (
@@ -1460,13 +1754,19 @@ export default function RequestsPage() {
         </TabsContent>
       </Tabs>
 
-      {/* MODAL GIỎ HÀNG (Dành cho Trưởng khoa) */}
+      {/* MODAL THIẾT BỊ ĐỀ XUẤT (Dành cho Trợ lý / Trưởng khoa) */}
       <Dialog open={cartOpen} onOpenChange={setCartOpen}>
         <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col p-0 overflow-hidden">
-          <DialogHeader className="p-5 border-b shadow-sm z-10 bg-card"><DialogTitle className="flex items-center gap-2"><ShoppingCart className="w-5 h-5 text-primary" /> Giỏ hàng yêu cầu cấp phát</DialogTitle></DialogHeader>
+          <DialogHeader className="p-5 border-b shadow-sm z-10 bg-card">
+            <DialogTitle className="flex items-center gap-2">
+              <ClipboardList className="w-5 h-5 text-primary" /> Danh sách thiết bị đề xuất cấp phát
+            </DialogTitle>
+          </DialogHeader>
           <div className="flex-1 overflow-y-auto bg-muted/10 p-5 space-y-5">
             {cart.length === 0 ? (
-              <div className="text-center p-12 text-muted-foreground border-2 border-dashed bg-card rounded-xl">Không có thiết bị trong giỏ. Vui lòng thêm từ mục Danh mục.</div>
+              <div className="text-center p-12 text-muted-foreground border-2 border-dashed bg-card rounded-xl">
+                Chưa có thiết bị nào trong danh sách đề xuất. Vui lòng chọn từ mục Danh mục thiết bị.
+              </div>
             ) : (
               <div className="space-y-3">
                 {cart.map((item, idx) => {
@@ -1564,253 +1864,206 @@ export default function RequestsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* MODAL TẠO ĐỀ XUẤT MỚI (Điều chuyển, Mua sắm mới, Báo hỏng) */}
+      {/* MODAL ĐỀ XUẤT THÊM (Khi khoa cần số lượng lớn mà kho không đủ để kho nhập thêm) */}
       <Dialog open={newProposalOpen} onOpenChange={setNewProposalOpen}>
-        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
-          <DialogHeader className="p-5 border-b shadow-sm z-10 bg-card">
-            <DialogTitle className="flex items-center gap-2 text-xl">
-              <Plus className="w-5 h-5 text-indigo-600" />
-              Tạo Đề Xuất / Tờ Trình Thiết Bị Y Tế
+        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
+          <DialogHeader className="p-5 border-b shadow-xs z-10 bg-card">
+            <DialogTitle className="flex items-center gap-3 text-lg font-bold text-foreground">
+              <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                <PackagePlus className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-base sm:text-lg">Phiếu Đề Xuất Nhập Thêm Thiết Bị / Vật Tư Y Tế</div>
+                <p className="text-xs text-muted-foreground font-normal mt-0.5">
+                  Đề xuất gửi Bộ phận Kho lập kế hoạch nhập thêm khi tồn kho hiện tại không đủ số lượng phục vụ khoa.
+                </p>
+              </div>
             </DialogTitle>
           </DialogHeader>
 
-          <div className="p-5 flex-1 overflow-y-auto space-y-5 bg-muted/10">
-            {/* Tabs chọn loại đề xuất */}
-            <div className="grid grid-cols-2 gap-2 p-1.5 bg-muted/40 rounded-xl border">
-              <button
-                type="button"
-                onClick={() => setProposalType('MUA_SAM')}
-                className={cn(
-                  "flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-bold transition-all",
-                  proposalType === 'MUA_SAM' 
-                    ? "bg-amber-600 text-white shadow-sm" 
-                    : "text-muted-foreground hover:bg-muted"
-                )}
-              >
-                <ShoppingBag className="w-4 h-4" />
-                <span>1. Đề xuất mua sắm mới</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setProposalType('BAO_HONG')}
-                className={cn(
-                  "flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-bold transition-all",
-                  proposalType === 'BAO_HONG' 
-                    ? "bg-rose-600 text-white shadow-sm" 
-                    : "text-muted-foreground hover:bg-muted"
-                )}
-              >
-                <Wrench className="w-4 h-4" />
-                <span>2. Báo hỏng & Sửa chữa</span>
-              </button>
+          <div className="p-5 flex-1 overflow-y-auto space-y-4 bg-muted/10">
+            {/* Thông tin đơn vị lập đề xuất */}
+            <div className="p-3 bg-card rounded-xl border flex items-center justify-between text-xs shadow-2xs">
+              <div className="flex items-center gap-2">
+                <Building2 className="w-4 h-4 text-emerald-600" />
+                <span className="text-muted-foreground">Khoa đề xuất:</span>
+                <span className="font-bold text-foreground">
+                  {user?.tenKhoa || departments.find(d => d.maKhoa === (user?.maKhoa || khoaYeuCau))?.tenKhoa || user?.maKhoa || khoaYeuCau}
+                </span>
+              </div>
+              <Badge variant="outline" className="text-[11px] font-medium border-emerald-200 text-emerald-800 bg-emerald-50/50">
+                Người lập: {user?.hoTen || 'Trợ lý khoa'}
+              </Badge>
             </div>
 
-            {proposalType === 'MUA_SAM' && (
-              <div className="space-y-4 bg-card p-5 rounded-xl border shadow-sm">
-                <div className="border-b pb-3 mb-3">
-                  <h3 className="font-bold text-base text-amber-900 flex items-center gap-2">
-                    <ShoppingBag className="w-5 h-5 text-amber-600" />
-                    Tờ trình đề xuất mua sắm trang thiết bị y tế mới
-                  </h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Đề xuất Ban Giám Đốc và Phòng Vật tư - TBYT mua sắm bổ sung máy móc, trang thiết bị mới.
-                  </p>
-                </div>
+            {/* Chọn thiết bị cần nhập thêm */}
+            <div className="space-y-1.5 bg-card p-4 rounded-xl border shadow-2xs">
+              <Label className="block text-xs font-bold text-foreground uppercase tracking-wide">
+                1. Chọn thiết bị / vật tư y tế cần nhập thêm <span className="text-destructive">*</span>
+              </Label>
+              <SearchableSelect
+                options={equipment.filter(e => e.trangThai).map(e => {
+                  const inv = inventory.find(i => i.maThietBi === e.maThietBi);
+                  const stock = inv?.soLuongKho ?? 0;
+                  return {
+                    value: e.maThietBi,
+                    label: `${e.tenThietBi} (${e.maThietBi}) - Tồn kho: ${stock} ${e.donViCoSo}`
+                  };
+                })}
+                value={restockEquipment}
+                onValueChange={(val) => {
+                  setRestockEquipment(val);
+                  const eq = equipment.find(e => e.maThietBi === val);
+                  if (eq) {
+                    setRestockUnit(eq.donViCoSo || 'Cái');
+                  }
+                }}
+                placeholder="Tìm và chọn thiết bị / vật tư trong danh mục..."
+              />
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="sm:col-span-2">
-                    <Label className="mb-1 block text-sm font-semibold">
-                      Tên trang thiết bị y tế đề xuất mua sắm <span className="text-destructive">*</span>
-                    </Label>
-                    <Input
-                      placeholder="Ví dụ: Máy đo khí máu động mạch tự động, Máy sốc tim..."
-                      value={purchaseName}
-                      onChange={e => setPurchaseName(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="sm:col-span-2">
-                    <Label className="mb-1 block text-sm font-semibold">
-                      Tiêu chuẩn & Quy cách kỹ thuật dự kiến
-                    </Label>
-                    <Textarea
-                      placeholder="Xuất xứ, hãng sản xuất, thông số kỹ thuật chính, tiêu chuẩn CE/FDA..."
-                      value={purchaseSpecs}
-                      onChange={e => setPurchaseSpecs(e.target.value)}
-                      className="h-20 resize-none"
-                    />
-                  </div>
-
-                  <div>
-                    <Label className="mb-1 block text-sm font-semibold">
-                      Số lượng đề xuất <span className="text-destructive">*</span>
-                    </Label>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={purchaseQty}
-                      onChange={e => setPurchaseQty(parseInt(e.target.value) || 1)}
-                    />
-                  </div>
-
-                  <div>
-                    <Label className="mb-1 block text-sm font-semibold">
-                      Đơn vị tính <span className="text-destructive">*</span>
-                    </Label>
-                    <Input
-                      placeholder="Ví dụ: Cái, Máy, Bộ, Hệ thống..."
-                      value={purchaseUnit}
-                      onChange={e => setPurchaseUnit(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="sm:col-span-2">
-                    <Label className="mb-1 block text-sm font-semibold">
-                      Dự toán kinh phí ước tính (VNĐ)
-                    </Label>
-                    <Input
-                      type="number"
-                      placeholder="Ví dụ: 350000000"
-                      value={purchaseBudget}
-                      onChange={e => setPurchaseBudget(e.target.value ? parseFloat(e.target.value) : '')}
-                    />
-                    {typeof purchaseBudget === 'number' && purchaseBudget > 0 && (
-                      <p className="text-xs text-amber-700 font-semibold mt-1">
-                        Bằng số: {purchaseBudget.toLocaleString('vi-VN')} VNĐ
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="sm:col-span-2">
-                    <Label className="mb-1 block text-sm font-semibold">
-                      Lý do & Thuyết minh sự cần thiết đầu tư <span className="text-destructive">*</span>
-                    </Label>
-                    <Textarea
-                      placeholder="Nêu rõ tình trạng thiếu hụt, số lượng ca bệnh cần phục vụ và hiệu quả chuyên môn..."
-                      value={purchaseReason}
-                      onChange={e => setPurchaseReason(e.target.value)}
-                      className="h-24 resize-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end pt-3 border-t">
-                  <Button
-                    onClick={handleSubmitPurchase}
-                    className="bg-amber-600 hover:bg-amber-700 text-white gap-2 shadow-sm"
-                    disabled={!purchaseName.trim() || !purchaseReason.trim() || purchaseQty <= 0}
-                  >
-                    <Send className="w-4 h-4" />
-                    Gửi tờ trình mua sắm
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {proposalType === 'BAO_HONG' && (
-              <div className="space-y-4 bg-card p-5 rounded-xl border shadow-sm">
-                <div className="border-b pb-3 mb-3">
-                  <h3 className="font-bold text-base text-rose-900 flex items-center gap-2">
-                    <Wrench className="w-5 h-5 text-rose-600" />
-                    Biên bản báo hỏng và đề nghị bảo trì, sửa chữa
-                  </h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Gửi thông báo sự cố hỏng hóc thiết bị để bộ phận kỹ thuật / QL Kho tiến hành kiểm tra, sửa chữa.
-                  </p>
-                </div>
-
-                <div className="grid gap-4">
-                  <div>
-                    <Label className="mb-1 block text-sm font-semibold">
-                      Chọn thiết bị & Mã cá thể gặp sự cố ({user?.maKhoa || khoaYeuCau}) <span className="text-destructive">*</span>
-                    </Label>
-                    {loadingDeptInstances ? (
-                      <div className="text-xs text-muted-foreground italic py-2">Đang tải danh sách thiết bị khoa đang giữ...</div>
-                    ) : deptInstances.length === 0 ? (
-                      <div className="text-xs text-amber-700 bg-amber-50 p-3 rounded-lg border border-amber-200">
-                        Khoa hiện chưa có thiết bị nào đang sử dụng để báo hỏng.
+              {/* Thông tin cảnh báo tồn kho của thiết bị được chọn */}
+              {restockEquipment && (() => {
+                const selectedEq = equipment.find(e => e.maThietBi === restockEquipment);
+                if (!selectedEq) return null;
+                const inv = inventory.find(i => i.maThietBi === selectedEq.maThietBi);
+                const stock = inv?.soLuongKho ?? 0;
+                return (
+                  <div className={cn(
+                    "p-3 rounded-xl border text-xs flex items-center justify-between mt-3 transition-all",
+                    stock <= 0 ? "bg-rose-50/80 border-rose-200 text-rose-900" : "bg-amber-50/80 border-amber-200 text-amber-900"
+                  )}>
+                    <div className="flex items-center gap-2.5">
+                      <AlertCircle className={cn("w-4 h-4 shrink-0", stock <= 0 ? "text-rose-600" : "text-amber-600")} />
+                      <div>
+                        <div className="font-bold">
+                          {stock <= 0 ? 'Hiện tại thiết bị này đã HẾT HÀNG trong kho trung tâm' : `Kho trung tâm hiện chỉ còn tồn: ${stock} ${selectedEq.donViCoSo}`}
+                        </div>
+                        <div className="text-[11px] opacity-80 mt-0.5">
+                          Số lượng tồn không đủ đáp ứng nhu cầu khoa. Kho sẽ căn cứ phiếu này để lập kế hoạch nhập hàng.
+                        </div>
                       </div>
-                    ) : (
-                      <SearchableSelect
-                        options={deptInstances.map(i => ({
-                          value: i.maCaThe,
-                          label: `${i.maCaThe} - ${i.tenThietBi} ${i.serialNumber ? `(Serial: ${i.serialNumber})` : ''}`
-                        }))}
-                        value={damageInstance}
-                        onValueChange={setDamageInstance}
-                        placeholder="Tìm và Chọn mã máy cá thể bị sự cố..."
-                      />
-                    )}
-                  </div>
-
-                  <div>
-                    <Label className="mb-1 block text-sm font-semibold">
-                      Mức độ ưu tiên xử lý <span className="text-destructive">*</span>
-                    </Label>
-                    <div className="grid grid-cols-2 gap-3 mt-1">
-                      <button
-                        type="button"
-                        onClick={() => setDamagePriority('BINH_THUONG')}
-                        className={cn(
-                          "p-3 rounded-xl border text-left flex items-center gap-2 transition-all",
-                          damagePriority === 'BINH_THUONG' ? "bg-amber-50 border-amber-400 text-amber-900 ring-1 ring-amber-400" : "bg-card text-muted-foreground"
-                        )}
-                      >
-                        <div className="w-3 h-3 rounded-full bg-amber-500" />
-                        <div>
-                          <div className="font-bold text-xs">Bình thường</div>
-                          <div className="text-[10px] text-muted-foreground">Sửa chữa theo kế hoạch</div>
-                        </div>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setDamagePriority('KHAN_CAP')}
-                        className={cn(
-                          "p-3 rounded-xl border text-left flex items-center gap-2 transition-all",
-                          damagePriority === 'KHAN_CAP' ? "bg-rose-50 border-rose-500 text-rose-900 ring-1 ring-rose-500" : "bg-card text-muted-foreground"
-                        )}
-                      >
-                        <div className="w-3 h-3 rounded-full bg-rose-600 animate-ping" />
-                        <div>
-                          <div className="font-bold text-xs text-destructive">Khẩn cấp / Cấp cứu</div>
-                          <div className="text-[10px] text-muted-foreground">Cần kỹ sư xử lý ngay lập tức</div>
-                        </div>
-                      </button>
                     </div>
+                    <Badge className={cn("shrink-0 font-bold ml-2", stock <= 0 ? "bg-rose-600 text-white" : "bg-amber-600 text-white")}>
+                      {stock <= 0 ? 'Hết tồn kho' : `Tồn kho: ${stock}`}
+                    </Badge>
                   </div>
+                );
+              })()}
+            </div>
 
-                  <div>
-                    <Label className="mb-1 block text-sm font-semibold">
-                      Mô tả hiện trạng hư hỏng & Triệu chứng lỗi <span className="text-destructive">*</span>
-                    </Label>
-                    <Textarea
-                      value={damageDescription}
-                      onChange={e => setDamageDescription(e.target.value)}
-                      placeholder="Mô tả chi tiết: Màn hình không lên nguồn, báo lỗi áp suất Sensor E-04, chập điện..."
-                      className="h-24 resize-none"
-                    />
-                  </div>
+            {/* Thông số số lượng, đơn vị tính, thời hạn */}
+            <div className="bg-card p-4 rounded-xl border shadow-2xs space-y-4">
+              <Label className="block text-xs font-bold text-foreground uppercase tracking-wide">
+                2. Nhu cầu số lượng & Thời gian cần
+              </Label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <Label className="mb-1 block text-xs font-medium">
+                    Số lượng khoa cần thêm <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={restockQty}
+                    onChange={e => setRestockQty(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="font-bold text-sm"
+                  />
                 </div>
 
-                <div className="flex justify-end pt-3 border-t">
-                  <Button
-                    onClick={handleSubmitDamage}
-                    className="bg-rose-600 hover:bg-rose-700 text-white gap-2 shadow-sm"
-                    disabled={!damageInstance || !damageDescription.trim()}
-                  >
-                    <Send className="w-4 h-4" />
-                    Gửi biên bản báo hỏng
-                  </Button>
+                <div>
+                  <Label className="mb-1 block text-xs font-medium">
+                    Đơn vị tính <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    value={restockUnit}
+                    onChange={e => setRestockUnit(e.target.value)}
+                    placeholder="Cái, Máy, Hộp, Bộ..."
+                    className="text-xs"
+                  />
+                </div>
+
+                <div>
+                  <Label className="mb-1 block text-xs font-medium">
+                    Thời gian dự kiến cần có
+                  </Label>
+                  <Input
+                    type="date"
+                    value={restockExpectedDate}
+                    onChange={e => setRestockExpectedDate(e.target.value)}
+                    className="text-xs"
+                  />
                 </div>
               </div>
-            )}
+
+              {/* Mức độ ưu tiên */}
+              <div>
+                <Label className="mb-1.5 block text-xs font-medium">
+                  Mức độ cấp thiết <span className="text-destructive">*</span>
+                </Label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setRestockPriority('BINH_THUONG')}
+                    className={cn(
+                      "p-2.5 rounded-xl border text-left flex items-center gap-2.5 transition-all cursor-pointer",
+                      restockPriority === 'BINH_THUONG' ? "bg-primary/5 border-primary text-primary ring-1 ring-primary/30 font-semibold shadow-2xs" : "bg-card text-muted-foreground border-border hover:bg-muted/40"
+                    )}
+                  >
+                    <div className={cn("w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0", restockPriority === 'BINH_THUONG' ? "border-primary bg-primary text-white" : "border-muted-foreground")}>
+                      {restockPriority === 'BINH_THUONG' && <Check className="w-2.5 h-2.5" />}
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold">Bình thường</div>
+                      <div className="text-[10px] text-muted-foreground">Kế hoạch dự trù bổ sung kho định kỳ</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setRestockPriority('KHAN_CAP')}
+                    className={cn(
+                      "p-2.5 rounded-xl border text-left flex items-center gap-2.5 transition-all cursor-pointer",
+                      restockPriority === 'KHAN_CAP' ? "bg-rose-50 border-rose-500 text-rose-900 ring-1 ring-rose-500 font-semibold shadow-2xs" : "bg-card text-muted-foreground border-border hover:bg-muted/40"
+                    )}
+                  >
+                    <div className={cn("w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0", restockPriority === 'KHAN_CAP' ? "border-rose-600 bg-rose-600 text-white" : "border-muted-foreground")}>
+                      {restockPriority === 'KHAN_CAP' && <Check className="w-2.5 h-2.5" />}
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-rose-700">🚨 Cần gấp</div>
+                      <div className="text-[10px] text-muted-foreground">Phục vụ ca mổ / điều trị bệnh nhân nặng khẩn cấp</div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Lý do & Căn cứ đề xuất */}
+            <div className="bg-card p-4 rounded-xl border shadow-2xs space-y-2">
+              <Label className="block text-xs font-bold text-foreground uppercase tracking-wide">
+                3. Lý do & Giải trình nhu cầu lâm sàng <span className="text-destructive">*</span>
+              </Label>
+              <Textarea
+                placeholder="Ví dụ: Khoa sắp tiếp nhận đợt bệnh nhân nặng cần theo dõi liên tục, số ca mổ tăng đột biến trong tuần tới, tồn kho hiện tại chỉ còn ít không đủ nhu cầu sử dụng của khoa, kính đề nghị Bộ phận Kho xem xét lập kế hoạch nhập thêm..."
+                value={restockReason}
+                onChange={e => setRestockReason(e.target.value)}
+                className="h-24 resize-none text-xs leading-relaxed"
+              />
+            </div>
           </div>
 
-          <DialogFooter className="p-3 border-t bg-card">
-            <Button variant="ghost" onClick={() => setNewProposalOpen(false)}>
+          <DialogFooter className="p-3.5 border-t bg-card flex justify-between items-center sm:justify-between">
+            <Button variant="ghost" size="sm" onClick={() => setNewProposalOpen(false)}>
               Đóng
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleSubmitRestockProposal}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 shadow-sm font-semibold"
+              disabled={!restockEquipment || restockQty <= 0 || !restockReason.trim()}
+            >
+              <Send className="w-3.5 h-3.5" />
+              Gửi đề xuất nhập thêm
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1838,6 +2091,11 @@ export default function RequestsPage() {
                       {/* Tiêu đề & Loại đề xuất */}
                       <div className="flex items-center justify-between p-4 rounded-xl border bg-muted/20">
                         <div className="flex items-center gap-3">
+                          {processingRequest.loaiDeXuat === 'DE_XUAT_THEM' && (
+                            <div className="p-2.5 bg-emerald-100 text-emerald-700 rounded-xl">
+                              <PackagePlus className="w-6 h-6" />
+                            </div>
+                          )}
                           {processingRequest.loaiDeXuat === 'DIEU_CHUYEN' && (
                             <div className="p-2.5 bg-purple-100 text-purple-700 rounded-xl">
                               <ArrowRightLeft className="w-6 h-6" />
@@ -1855,6 +2113,7 @@ export default function RequestsPage() {
                           )}
                           <div>
                             <div className="font-bold text-base text-foreground">
+                              {processingRequest.loaiDeXuat === 'DE_XUAT_THEM' && 'Phiếu Đề Xuất Nhập Thêm Thiết Bị'}
                               {processingRequest.loaiDeXuat === 'DIEU_CHUYEN' && 'Đề xuất Điều chuyển Thiết bị'}
                               {processingRequest.loaiDeXuat === 'MUA_SAM' && 'Tờ trình Đề xuất Mua sắm Mới'}
                               {processingRequest.loaiDeXuat === 'BAO_HONG' && 'Biên bản Báo hỏng & Sửa chữa'}
@@ -1869,6 +2128,61 @@ export default function RequestsPage() {
                           {STATUS_MAP[processingRequest.trangThai as keyof typeof STATUS_MAP] || processingRequest.trangThai}
                         </span>
                       </div>
+
+                      {/* CHI TIẾT: ĐỀ XUẤT NHẬP THÊM */}
+                      {processingRequest.loaiDeXuat === 'DE_XUAT_THEM' && (() => {
+                        const mainItem = processingRequest.items?.[0] || {};
+                        const eq = equipment.find(e => e.maThietBi === (mainItem.maThietBi || processingRequest.maThietBi));
+                        const inv = inventory.find(i => i.maThietBi === (mainItem.maThietBi || processingRequest.maThietBi));
+                        const currentStock = inv?.soLuongKho ?? 0;
+                        return (
+                          <div className="space-y-4">
+                            <div className="p-4 rounded-xl bg-emerald-50/50 border border-emerald-200 space-y-3">
+                              <div className="flex justify-between items-start">
+                                <div>
+                                  <p className="text-xs text-emerald-800 font-semibold">Thiết bị / Vật tư y tế đề xuất nhập thêm:</p>
+                                  <p className="text-lg font-bold text-emerald-950 mt-0.5">
+                                    {mainItem.tenThietBi || processingRequest.tenThietBiMoi || processingRequest.maThietBi}
+                                  </p>
+                                </div>
+                                <div>
+                                  <span className={cn(
+                                    "px-2.5 py-1 rounded-md text-xs font-bold border flex items-center gap-1",
+                                    processingRequest.mucDoUuTien === 'KHAN_CAP' 
+                                      ? "bg-rose-600 text-white border-rose-700 animate-pulse" 
+                                      : "bg-emerald-100 text-emerald-800 border-emerald-300"
+                                  )}>
+                                    {processingRequest.mucDoUuTien === 'KHAN_CAP' ? '🚨 CẦN GẤP' : 'Ưu tiên bình thường'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs pt-2 border-t border-emerald-200/60">
+                                <div>
+                                  <span className="text-emerald-800 font-medium block">Khoa đề xuất:</span>
+                                  <span className="font-bold text-foreground text-sm">{departments.find(d => d.maKhoa === processingRequest.maKhoa)?.tenKhoa || processingRequest.maKhoa}</span>
+                                </div>
+                                <div>
+                                  <span className="text-emerald-800 font-medium block">Số lượng đề xuất thêm:</span>
+                                  <span className="font-extrabold text-emerald-700 text-base">+{processingRequest.soLuongYeuCau || mainItem.soLuong || 1} {mainItem.donViTinh || mainItem.donVi || 'Cái'}</span>
+                                </div>
+                                <div>
+                                  <span className="text-emerald-800 font-medium block">Tồn kho hiện tại:</span>
+                                  <span className={cn("font-bold text-sm", currentStock <= 0 ? "text-destructive" : "text-amber-700")}>
+                                    {currentStock <= 0 ? 'Hết hàng (0)' : `${currentStock} ${eq?.donViCoSo || 'Cái'}`}
+                                  </span>
+                                </div>
+                                <div className="col-span-2 sm:col-span-3">
+                                  <span className="text-emerald-800 font-medium block mb-1">Lý do & Căn cứ đề xuất nhập thêm:</span>
+                                  <div className="p-3 rounded-lg bg-white/90 border border-emerald-200 italic text-foreground text-xs leading-relaxed">
+                                    "{processingRequest.lyDo || 'Khoa cần bổ sung thiết bị phục vụ điều trị.'}"
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       {/* CHI TIẾT 1: ĐIỀU CHUYỂN THIẾT BỊ */}
                       {processingRequest.loaiDeXuat === 'DIEU_CHUYEN' && (
@@ -2646,7 +2960,7 @@ export default function RequestsPage() {
               return (
                 <div 
                   id="request-form-content" 
-                  className="bg-white text-gray-900 p-8 rounded-lg shadow-sm border border-gray-200 mx-auto max-w-3xl font-serif text-[14px] leading-relaxed"
+                  className="bg-white text-gray-900 p-8 rounded-lg shadow-sm border border-gray-200 mx-auto max-w-3xl font-sans text-[14px] leading-relaxed"
                 >
                   {/* Tiêu đề & Quốc hiệu */}
                   <div className="header-grid flex justify-between items-start border-b pb-4 mb-4">
@@ -2669,7 +2983,7 @@ export default function RequestsPage() {
                   {loai === 'DIEU_CHUYEN' ? (
                     <>
                       <div className="title-area text-center my-6">
-                        <h2 className="text-xl font-bold uppercase tracking-wide text-gray-900 mb-1">
+                        <h2 className="text-xl font-bold uppercase text-gray-900 mb-1">
                           BIÊN BẢN ĐIỀU CHUYỂN TRANG THIẾT BỊ Y TẾ
                         </h2>
                         <p className="italic text-xs text-gray-600">
@@ -2756,69 +3070,73 @@ export default function RequestsPage() {
                         </div>
                       </div>
                     </>
-                  ) : loai === 'MUA_SAM' ? (
-                    /* BIỂU MẪU 2: TỜ TRÌNH ĐỀ XUẤT MUA SẮM MỚI */
+                  ) : loai === 'DE_XUAT_THEM' ? (
+                    /* BIỂU MẪU 2: PHIẾU ĐỀ NGHỊ BỔ SUNG TRANG THIẾT BỊ / NHẬP THÊM HÀNG */
                     <>
                       <div className="title-area text-center my-6">
-                        <h2 className="text-xl font-bold uppercase tracking-wide text-gray-900 mb-1">
-                          TỜ TRÌNH ĐỀ XUẤT MUA SẮM TRANG THIẾT BỊ Y TẾ MỚI
+                        <h2 className="text-xl font-bold uppercase text-emerald-900 mb-1">
+                          PHIẾU ĐỀ NGHỊ BỔ SUNG TRANG THIẾT BỊ / NHẬP THÊM HÀNG
                         </h2>
                         <p className="italic text-xs text-gray-600">
-                          (V/v đề nghị đầu tư mua sắm bổ sung trang thiết bị y tế phục vụ khám chữa bệnh)
+                          (Áp dụng khi tồn kho trung tâm không đủ đáp ứng nhu cầu sử dụng của khoa lâm sàng)
                         </p>
                       </div>
 
                       <div className="space-y-2 mb-5 text-[13px]">
                         <div className="italic text-center font-medium mb-3">
-                          Kính gửi: BAN GIÁM ĐỐC BỆNH VIỆN - PHÒNG VẬT TƯ TRANG THIẾT BỊ Y TẾ - PHÒNG TÀI CHÍNH
+                          Kính gửi: Ban Giám Đốc Bệnh Viện, Phòng Vật tư - TBYT & Bộ phận Quản lý Kho
                         </div>
-                        <div className="grid grid-cols-2 gap-2 bg-gray-50 p-3 rounded border border-gray-100">
-                          <div><span className="font-semibold">Đơn vị lập tờ trình:</span> {tenKhoa}</div>
+                        <div className="grid grid-cols-2 gap-2 bg-emerald-50/40 p-3 rounded border border-emerald-100">
+                          <div><span className="font-semibold">Đơn vị đề xuất:</span> {tenKhoa}</div>
                           <div><span className="font-semibold">Mã khoa:</span> {previewReq.maKhoa}</div>
-                          <div><span className="font-semibold">Cán bộ đề xuất:</span> {tenNguoiYeuCau}</div>
+                          <div><span className="font-semibold">Cán bộ đề xuất (Trợ lý):</span> {tenNguoiYeuCau}</div>
                           <div><span className="font-semibold">Thời gian tạo:</span> {dateCreated.toLocaleString('vi-VN')}</div>
-                          <div className="col-span-2">
-                            <span className="font-semibold">Trạng thái tờ trình:</span> <span className="font-bold text-amber-700">{STATUS_MAP[previewReq.trangThai as keyof typeof STATUS_MAP] || previewReq.trangThai}</span>
+                          <div>
+                            <span className="font-semibold">Mức độ ưu tiên:</span>{' '}
+                            <span className={cn("font-bold px-2 py-0.5 rounded text-xs", previewReq.mucDoUuTien === 'KHAN_CAP' ? "bg-rose-100 text-destructive border border-rose-300" : "bg-emerald-100 text-emerald-800")}>
+                              {previewReq.mucDoUuTien === 'KHAN_CAP' ? '🚨 CẦN GẤP' : 'Bình thường'}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="font-semibold">Trạng thái phiếu:</span> <span className="font-bold text-emerald-800">{STATUS_MAP[previewReq.trangThai as keyof typeof STATUS_MAP] || previewReq.trangThai}</span>
                           </div>
                         </div>
                       </div>
 
                       <div className="mb-6">
                         <div className="font-semibold text-[13px] mb-2 uppercase tracking-wide">
-                          I. Danh mục trang thiết bị y tế đề xuất mua sắm:
+                          I. Danh mục trang thiết bị / vật tư y tế đề xuất nhập thêm:
                         </div>
                         <table className="w-full border-collapse border border-gray-400 text-[12px]">
                           <thead>
                             <tr className="bg-gray-100 font-bold text-center">
                               <th className="border border-gray-400 p-2 w-10">STT</th>
-                              <th className="border border-gray-400 p-2 text-left">Tên trang thiết bị y tế</th>
-                              <th className="border border-gray-400 p-2 text-left">Tiêu chuẩn & Quy cách kỹ thuật</th>
+                              <th className="border border-gray-400 p-2 text-left">Tên trang thiết bị / vật tư</th>
+                              <th className="border border-gray-400 p-2 w-28">Mã thiết bị</th>
                               <th className="border border-gray-400 p-2 w-16">ĐVT</th>
-                              <th className="border border-gray-400 p-2 w-16">SL</th>
-                              <th className="border border-gray-400 p-2 text-right w-36">Dự toán kinh phí</th>
+                              <th className="border border-gray-400 p-2 w-24">SL Đề xuất thêm</th>
+                              <th className="border border-gray-400 p-2 w-28">Mức độ ưu tiên</th>
+                              <th className="border border-gray-400 p-2 text-left">Thời hạn cần có</th>
                             </tr>
                           </thead>
                           <tbody>
                             <tr className="hover:bg-gray-50">
                               <td className="border border-gray-400 p-2 text-center">1</td>
                               <td className="border border-gray-400 p-2 font-bold text-gray-900">
-                                {previewReq.tenThietBiMoi || 'Thiết bị mua sắm mới'}
+                                {mainItem.tenThietBi || previewReq.tenThietBiMoi || previewReq.maThietBi}
+                              </td>
+                              <td className="border border-gray-400 p-2 text-center font-mono text-xs">
+                                {previewReq.maThietBi || mainItem.maThietBi}
+                              </td>
+                              <td className="border border-gray-400 p-2 text-center">{mainItem.donViTinh || mainItem.donVi || 'Cái'}</td>
+                              <td className="border border-gray-400 p-2 text-center font-bold text-base text-emerald-700">
+                                +{previewReq.soLuongYeuCau || mainItem.soLuong || 1}
+                              </td>
+                              <td className="border border-gray-400 p-2 text-center font-medium">
+                                {previewReq.mucDoUuTien === 'KHAN_CAP' ? '🚨 Cần gấp' : 'Bình thường'}
                               </td>
                               <td className="border border-gray-400 p-2 text-gray-700">
-                                {previewReq.quyCachKyThuat || 'Theo tiêu chuẩn Bộ Y Tế và yêu cầu lâm sàng'}
-                              </td>
-                              <td className="border border-gray-400 p-2 text-center">{itemsList[0]?.donVi || 'Cái'}</td>
-                              <td className="border border-gray-400 p-2 text-center font-bold text-base text-primary">
-                                {previewReq.soLuongYeuCau || 1}
-                              </td>
-                              <td className="border border-gray-400 p-2 text-right font-bold text-amber-700">
-                                {previewReq.duToanKinhPhi ? previewReq.duToanKinhPhi.toLocaleString('vi-VN') + ' đ' : 'Chưa có'}
-                              </td>
-                            </tr>
-                            <tr className="bg-gray-50 font-bold">
-                              <td colSpan={5} className="border border-gray-400 p-2 text-right uppercase">Tổng kinh phí dự toán:</td>
-                              <td className="border border-gray-400 p-2 text-right text-amber-800 text-sm">
-                                {previewReq.duToanKinhPhi ? previewReq.duToanKinhPhi.toLocaleString('vi-VN') + ' VNĐ' : 'Chưa xác định'}
+                                {mainItem.ngayTraDuKien ? new Date(mainItem.ngayTraDuKien).toLocaleDateString('vi-VN') : 'Sớm nhất có thể'}
                               </td>
                             </tr>
                           </tbody>
@@ -2827,10 +3145,10 @@ export default function RequestsPage() {
 
                       <div className="mb-6">
                         <div className="font-semibold text-[13px] mb-2 uppercase tracking-wide">
-                          II. Thuyết minh sự cần thiết và hiệu quả đầu tư:
+                          II. Căn cứ & Thuyết minh nhu cầu lâm sàng cần nhập thêm:
                         </div>
                         <div className="bg-gray-50 p-3 rounded border border-gray-100 italic text-[13px] text-gray-800 leading-relaxed">
-                          {previewReq.lyDo || 'Căn cứ vào nhu cầu điều trị thực tế của bệnh nhân và định hướng nâng cao chất lượng khám chữa bệnh chuyên sâu tại khoa, kính đề nghị Ban Giám Đốc và các phòng chức năng phê duyệt chủ trương mua sắm.'}
+                          {previewReq.lyDo || 'Khoa chuẩn bị tiếp nhận đợt bệnh nhân nặng tăng cao, số lượng tồn kho khả dụng hiện tại không đủ đáp ứng, kính đề nghị Bộ phận Kho và Ban Giám Đốc phê duyệt kế hoạch nhập thêm hàng.'}
                         </div>
                       </div>
 
@@ -2845,17 +3163,17 @@ export default function RequestsPage() {
                             <div className="sig-name font-bold text-[11px]">{tenNguoiYeuCau}</div>
                           </div>
                           <div className="sig-box">
-                            <div className="sig-title font-bold uppercase text-[11px]">TRƯỞNG KHOA PHÒNG</div>
+                            <div className="sig-title font-bold uppercase text-[11px]">TRƯỞNG KHOA LÂM SÀNG</div>
                             <div className="sig-sub italic text-[10px] text-gray-500 mb-16">(Ký và ghi rõ họ tên)</div>
                             <div className="sig-name font-bold text-[11px]"></div>
                           </div>
                           <div className="sig-box">
-                            <div className="sig-title font-bold uppercase text-[11px]">PHÒNG VẬT TƯ - TBYT</div>
+                            <div className="sig-title font-bold uppercase text-[11px]">BỘ PHẬN KHO TIẾP NHẬN</div>
                             <div className="sig-sub italic text-[10px] text-gray-500 mb-16">(Ký và ghi rõ họ tên)</div>
                             <div className="sig-name font-bold text-[11px]"></div>
                           </div>
                           <div className="sig-box">
-                            <div className="sig-title font-bold uppercase text-[11px]">BAN GIÁM ĐỐC</div>
+                            <div className="sig-title font-bold uppercase text-[11px]">BAN GIÁM ĐỐC / PHÒNG VẬT TƯ</div>
                             <div className="sig-sub italic text-[10px] text-gray-500 mb-16">(Phê duyệt)</div>
                             <div className="sig-name font-bold text-[11px]"></div>
                           </div>
@@ -2866,7 +3184,7 @@ export default function RequestsPage() {
                     /* BIỂU MẪU 3: BIÊN BẢN BÁO HỎNG & ĐỀ NGHỊ BẢO TRÌ SỬA CHỮA */
                     <>
                       <div className="title-area text-center my-6">
-                        <h2 className="text-xl font-bold uppercase tracking-wide text-rose-900 mb-1">
+                        <h2 className="text-xl font-bold uppercase text-rose-900 mb-1">
                           BIÊN BẢN GHI NHẬN HƯ HỎNG & ĐỀ NGHỊ BẢO TRÌ SỬA CHỮA
                         </h2>
                         <p className="italic text-xs text-gray-600">
@@ -2968,7 +3286,7 @@ export default function RequestsPage() {
                     /* BIỂU MẪU 4: CẤP PHÁT THIẾT BỊ TỪ KHO (MẶC ĐỊNH) */
                     <>
                       <div className="title-area text-center my-6">
-                        <h2 className="text-xl font-bold uppercase tracking-wide text-gray-900 mb-1">
+                        <h2 className="text-xl font-bold uppercase text-gray-900 mb-1">
                           GIẤY ĐỀ NGHỊ CẤP PHÁT THIẾT BỊ Y TẾ
                         </h2>
                         <p className="italic text-xs text-gray-600">

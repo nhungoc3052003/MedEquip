@@ -33,6 +33,9 @@ Thumbs.db
 
 server/config/db.js
 
+# Uploads
+server/uploads/
+
 # Archives
 MedEquip.zip
 *.zip

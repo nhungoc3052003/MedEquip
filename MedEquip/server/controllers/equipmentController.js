@@ -1,10 +1,12 @@
 import { pool } from "../config/db.js";
+import { detectNhomThietBi } from "../utils/categoryHelper.js";
 
 function mapEquipment(row) {
   return {
     maThietBi: row.ma_thiet_bi,
     tenThietBi: row.ten_thiet_bi,
     loaiThietBi: row.loai_thiet_bi,
+    nhomThietBi: row.nhom_thiet_bi || detectNhomThietBi(row.ten_thiet_bi, row.loai_thiet_bi),
     donViCoSo: row.don_vi_co_so,
     donViNhap: row.don_vi_nhap,
     heSoQuyDoi: row.he_so_quy_doi || 1,
@@ -18,7 +20,8 @@ function mapEquipment(row) {
     chuKyBaoTri: row.chu_ky_bao_tri || null,
     ngayBaoTriGanNhat: row.ngay_bao_tri_gan_nhat || null,
     ngayBaoTriTiepTheo: row.ngay_bao_tri_tiep_theo || null,
-    trangThaiBaoTri: row.trang_thai_bao_tri || 'BINH_THUONG'
+    trangThaiBaoTri: row.trang_thai_bao_tri || 'BINH_THUONG',
+    soLuongKho: row.so_luong_kho != null ? Number(row.so_luong_kho) : 0
   };
 }
 
@@ -58,7 +61,7 @@ export async function getAllEquipment(req, res) {
 
 export async function createEquipment(req, res) {
   try {
-    const { tenThietBi, loaiThietBi, donViCoSo, donViNhap, heSoQuyDoi, serialNumber, nguongCanhBao, moTa, maNhaCungCap, hinhAnh } = req.body;
+    const { tenThietBi, loaiThietBi, nhomThietBi, donViCoSo, donViNhap, heSoQuyDoi, serialNumber, nguongCanhBao, moTa, maNhaCungCap, hinhAnh } = req.body;
 
     if (!tenThietBi || !loaiThietBi) {
       return res.json({ success: false, message: "Tên thiết bị và loại là bắt buộc." });
@@ -67,10 +70,11 @@ export async function createEquipment(req, res) {
     const [existing] = await pool.query("SELECT ma_thiet_bi FROM thiet_bi WHERE ten_thiet_bi = ?", [tenThietBi]);
     if (existing.length > 0) return res.json({ success: false, message: "Thiết bị đã tồn tại." });
 
+    const finalNhom = detectNhomThietBi(tenThietBi, loaiThietBi, nhomThietBi);
     const id = "TB-" + String(Date.now()).slice(-6);
     await pool.query(
-      "INSERT INTO thiet_bi (ma_thiet_bi, ten_thiet_bi, loai_thiet_bi, don_vi_co_so, don_vi_nhap, he_so_quy_doi, serial_number, nguong_canh_bao, mo_ta, ma_nha_cung_cap, hinh_anh, trang_thai) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)",
-      [id, tenThietBi, loaiThietBi || "TAI_SU_DUNG", donViCoSo || "Cái", donViNhap || "Hộp", heSoQuyDoi || 1,
+      "INSERT INTO thiet_bi (ma_thiet_bi, ten_thiet_bi, loai_thiet_bi, nhom_thiet_bi, don_vi_co_so, don_vi_nhap, he_so_quy_doi, serial_number, nguong_canh_bao, mo_ta, ma_nha_cung_cap, hinh_anh, trang_thai) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)",
+      [id, tenThietBi, loaiThietBi || "TAI_SU_DUNG", finalNhom, donViCoSo || "Cái", donViNhap || "Hộp", heSoQuyDoi || 1,
        loaiThietBi === "TAI_SU_DUNG" ? (serialNumber || null) : null,
        nguongCanhBao || 10, moTa || "", maNhaCungCap || null, hinhAnh || ""]
     );
@@ -110,7 +114,7 @@ export async function deleteEquipment(req, res) {
 
 export async function updateEquipment(req, res) {
   try {
-    const { tenThietBi, loaiThietBi, donViCoSo, donViNhap, heSoQuyDoi, serialNumber, nguongCanhBao, moTa, maNhaCungCap, hinhAnh, trangThai } = req.body;
+    const { tenThietBi, loaiThietBi, nhomThietBi, donViCoSo, donViNhap, heSoQuyDoi, serialNumber, nguongCanhBao, moTa, maNhaCungCap, hinhAnh, trangThai } = req.body;
     const id = req.params.id;
 
     const [existing] = await pool.query("SELECT * FROM thiet_bi WHERE ma_thiet_bi = ?", [id]);
@@ -118,10 +122,11 @@ export async function updateEquipment(req, res) {
 
     const newTrangThai = trangThai !== undefined ? trangThai : existing[0].trang_thai;
     const newSerial = loaiThietBi === "TAI_SU_DUNG" ? (serialNumber || null) : null;
+    const finalNhom = nhomThietBi || existing[0].nhom_thiet_bi || detectNhomThietBi(tenThietBi, loaiThietBi);
 
     await pool.query(
-      "UPDATE thiet_bi SET ten_thiet_bi=?, loai_thiet_bi=?, don_vi_co_so=?, don_vi_nhap=?, he_so_quy_doi=?, serial_number=?, nguong_canh_bao=?, mo_ta=?, ma_nha_cung_cap=?, hinh_anh=?, trang_thai=? WHERE ma_thiet_bi=?",
-      [tenThietBi, loaiThietBi || "TAI_SU_DUNG", donViCoSo || "Cái", donViNhap || "Hộp", heSoQuyDoi || 1,
+      "UPDATE thiet_bi SET ten_thiet_bi=?, loai_thiet_bi=?, nhom_thiet_bi=?, don_vi_co_so=?, don_vi_nhap=?, he_so_quy_doi=?, serial_number=?, nguong_canh_bao=?, mo_ta=?, ma_nha_cung_cap=?, hinh_anh=?, trang_thai=? WHERE ma_thiet_bi=?",
+      [tenThietBi, loaiThietBi || "TAI_SU_DUNG", finalNhom, donViCoSo || "Cái", donViNhap || "Hộp", heSoQuyDoi || 1,
        newSerial, nguongCanhBao || 10, moTa || "", maNhaCungCap || null, hinhAnh || "", newTrangThai, id]
     );
 

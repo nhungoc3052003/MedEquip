@@ -1,13 +1,16 @@
 import { Router } from "express";
 import { authMiddleware, roleMiddleware } from "../middleware/auth.js";
+import { uploadProfileDocs } from "../middleware/upload.js";
 import { getAllUsers, getUserById, createUser, updateUser, deactivateUser, activateUser, changeUserRole, deleteUser } from "../controllers/userController.js";
+import { resendUserCredentials } from "../controllers/accountRequestController.js";
 
 const router = Router();
 
 router.get("/", authMiddleware, getAllUsers);
 router.get("/:id", authMiddleware, getUserById);
-router.post("/", authMiddleware, roleMiddleware("ADMIN"), createUser);
-router.put("/:id", authMiddleware, updateUser);
+router.post("/", authMiddleware, roleMiddleware("ADMIN"), uploadProfileDocs.array("files", 5), createUser);
+router.put("/:id", authMiddleware, roleMiddleware("ADMIN"), uploadProfileDocs.array("files", 5), updateUser);
+router.post("/:id/resend-credentials", authMiddleware, roleMiddleware("ADMIN"), resendUserCredentials);
 router.put("/:id/deactivate", authMiddleware, roleMiddleware("ADMIN"), deactivateUser);
 router.put("/:id/activate", authMiddleware, roleMiddleware("ADMIN"), activateUser);
 router.put("/:id/role", authMiddleware, roleMiddleware("ADMIN"), changeUserRole);

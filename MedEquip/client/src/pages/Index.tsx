@@ -16,6 +16,7 @@ import NotificationsPage from '@/pages/NotificationsPage';
 import ProfilePage from '@/pages/ProfilePage';
 import ReportsPage from '@/pages/ReportsPage';
 import MaintenancePage from '@/pages/MaintenancePage';
+import { ForcePasswordChangeModal } from '@/components/ForcePasswordChangeModal';
 
 const pages: Record<PageKey, React.ComponentType> = {
   dashboard: DashboardPage,
@@ -43,9 +44,12 @@ function AppContent() {
   const PageComponent = pages[currentPage];
 
   return (
-    <AppLayout currentPage={currentPage} onNavigate={setCurrentPage}>
-      <PageComponent />
-    </AppLayout>
+    <>
+      <ForcePasswordChangeModal />
+      <AppLayout currentPage={currentPage} onNavigate={setCurrentPage}>
+        <PageComponent />
+      </AppLayout>
+    </>
   );
 }
 

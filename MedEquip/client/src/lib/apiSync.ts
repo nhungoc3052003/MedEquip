@@ -6,30 +6,48 @@
 import { isMockMode, fetchApi } from '@/services/api';
 import { store, generateId } from './store';
 import { refreshData } from './dataLoader';
-import { NguoiDung, ThietBi, NhaCungCap, Khoa, PhieuYeuCauCapPhat, PhieuNhapKho, PhieuXuatKho, PhieuCapPhat, PhieuBaoHuHong, UserRole, PhieuYeuCauNhap, PhieuTraThietBi } from '@/types';
+import { NguoiDung, ThietBi, NhaCungCap, Khoa, PhieuYeuCauCapPhat, PhieuNhapKho, PhieuXuatKho, PhieuCapPhat, PhieuBaoHuHong, UserRole, PhieuYeuCauNhap, PhieuTraThietBi, YeuCauCapTaiKhoan } from '@/types';
 
 // ---- Users ----
-export async function apiCreateUser(data: { hoTen: string; email: string; matKhau: string; vaiTro: UserRole }) {
+export async function apiCreateUser(data: (Partial<NguoiDung> & { hoTen: string; email: string; vaiTro: UserRole }) | FormData) {
+  const isFormData = typeof FormData !== 'undefined' && data instanceof FormData;
   if (isMockMode()) {
     const users = store.getUsers();
-    if (users.some(u => u.email === data.email)) return { success: false, message: 'Email đã tồn tại' };
-    const newUser: NguoiDung = { maNguoiDung: generateId('ND'), ...data, trangThai: true, ngayTao: new Date().toISOString(), ngayCapNhat: new Date().toISOString() };
+    const email = isFormData ? (data as FormData).get('email') as string : (data as any).email;
+    if (users.some(u => u.email === email)) return { success: false, message: 'Email đã tồn tại' };
+    const rawData = isFormData ? Object.fromEntries((data as FormData).entries()) : data;
+    const newUser: NguoiDung = { 
+      maNguoiDung: generateId('ND'), 
+      matKhau: (rawData as any).matKhau || '123456',
+      ...(rawData as any), 
+      trangThai: true, 
+      ngayTao: new Date().toISOString(), 
+      ngayCapNhat: new Date().toISOString() 
+    };
     users.push(newUser);
     store.setUsers(users);
     return { success: true, user: newUser };
   }
-  const result = await fetchApi<any>('/users', { method: 'POST', body: JSON.stringify(data) });
+  const result = await fetchApi<any>('/users', { 
+    method: 'POST', 
+    body: isFormData ? (data as FormData) : JSON.stringify(data) 
+  });
   if (result.success) await refreshData('users');
   return result;
 }
 
-export async function apiUpdateUser(userId: string, updates: Partial<NguoiDung>) {
+export async function apiUpdateUser(userId: string, updates: Partial<NguoiDung> | FormData) {
+  const isFormData = typeof FormData !== 'undefined' && updates instanceof FormData;
   if (isMockMode()) {
     const users = store.getUsers();
-    store.setUsers(users.map(u => u.maNguoiDung === userId ? { ...u, ...updates, ngayCapNhat: new Date().toISOString() } : u));
+    const rawUpdates = isFormData ? Object.fromEntries((updates as FormData).entries()) : updates;
+    store.setUsers(users.map(u => u.maNguoiDung === userId ? { ...u, ...(rawUpdates as any), ngayCapNhat: new Date().toISOString() } : u));
     return { success: true };
   }
-  const result = await fetchApi<any>(`/users/${userId}`, { method: 'PUT', body: JSON.stringify(updates) });
+  const result = await fetchApi<any>(`/users/${userId}`, { 
+    method: 'PUT', 
+    body: isFormData ? (updates as FormData) : JSON.stringify(updates) 
+  });
   if (result.success) await refreshData('users');
   return result;
 }
@@ -50,10 +68,45 @@ export async function apiChangePassword(userId: string, currentPassword: string,
     const user = users.find(u => u.maNguoiDung === userId);
     if (!user) return { success: false, message: 'Không tìm thấy người dùng.' };
     if (user.matKhau !== currentPassword) return { success: false, message: 'Mật khẩu hiện tại không đúng!' };
-    store.setUsers(users.map(u => u.maNguoiDung === userId ? { ...u, matKhau: newPassword, ngayCapNhat: new Date().toISOString() } : u));
+    store.setUsers(users.map(u => u.maNguoiDung === userId ? { ...u, matKhau: newPassword, yeuCauDoiMatKhau: false, ngayCapNhat: new Date().toISOString() } : u));
     return { success: true, message: 'Đổi mật khẩu thành công!' };
   }
   return fetchApi<any>('/auth/change-password', { method: 'PUT', body: JSON.stringify({ userId, currentPassword, newPassword }) });
+}
+
+// ---- Account Requests (Đề xuất cấp tài khoản & hồ sơ) ----
+export async function apiGetAccountRequests(): Promise<YeuCauCapTaiKhoan[]> {
+  try {
+    return await fetchApi<YeuCauCapTaiKhoan[]>('/account-requests');
+  } catch (err) {
+    console.error('Lỗi apiGetAccountRequests:', err);
+    return [];
+  }
+}
+
+export async function apiCreateAccountRequest(formData: FormData | object): Promise<any> {
+  const isFormData = typeof FormData !== 'undefined' && formData instanceof FormData;
+  return fetchApi<any>('/account-requests', {
+    method: 'POST',
+    body: isFormData ? (formData as FormData) : JSON.stringify(formData),
+  });
+}
+
+export async function apiApproveAccountRequest(id: string): Promise<any> {
+  const result = await fetchApi<any>(`/account-requests/${id}/approve`, { method: 'PUT' });
+  if (result.success) await refreshData('users');
+  return result;
+}
+
+export async function apiRejectAccountRequest(id: string, lyDoTuChoi: string): Promise<any> {
+  return fetchApi<any>(`/account-requests/${id}/reject`, {
+    method: 'PUT',
+    body: JSON.stringify({ lyDoTuChoi }),
+  });
+}
+
+export async function apiResendUserCredentials(userId: string): Promise<any> {
+  return fetchApi<any>(`/account-requests/resend-credentials/${userId}`, { method: 'POST' });
 }
 
 // ---- Equipment ----
@@ -228,7 +281,7 @@ export async function apiCreateRequest(data: {
 }) {
   if (isMockMode()) {
     const phieu: PhieuYeuCauCapPhat = {
-      maPhieu: generateId(data.loaiDeXuat === 'DIEU_CHUYEN' ? 'DXDC' : (data.loaiDeXuat === 'MUA_SAM' ? 'DXMS' : (data.loaiDeXuat === 'BAO_HONG' ? 'DXBH' : 'YCCF'))),
+      maPhieu: generateId(data.loaiDeXuat === 'DIEU_CHUYEN' ? 'DXDC' : (data.loaiDeXuat === 'DE_XUAT_THEM' ? 'DXNT' : (data.loaiDeXuat === 'MUA_SAM' ? 'DXMS' : (data.loaiDeXuat === 'BAO_HONG' ? 'DXBH' : 'YCCF')))),
       maNguoiYeuCau: data.maNguoiYeuCau || 'ND001',
       maKhoa: data.maKhoa,
       lyDo: data.lyDo,
@@ -310,16 +363,42 @@ export async function apiProcessRequestItems(maPhieu: string, data: { items: { m
 export async function apiApproveRequest(maPhieu: string, approved: boolean, lyDo?: string) {
   if (isMockMode()) {
     const requests = store.getRequests();
+    const target = requests.find(r => r.maPhieu === maPhieu);
+    const inventory = store.getInventory();
+    const inv = inventory.find(i => i.maThietBi === target?.maThietBi);
+    const stockAvailable = inv?.soLuongKho ?? 0;
+    const reqQty = target?.soLuongYeuCau ?? 1;
+
+    let newStatus: any = approved ? 'DA_QL_KHO_DUYET' : 'TU_CHOI';
+    let autoMsg = approved ? 'Trưởng khoa đã duyệt và Hệ thống tự động phê duyệt do kho đủ số lượng thiết bị.' : (lyDo || 'Đã từ chối');
+
+    if (approved && target?.loaiDeXuat === 'CAP_PHAT') {
+      if (stockAvailable < reqQty) {
+        newStatus = 'TU_CHOI';
+        autoMsg = `Hệ thống tự động từ chối: Kho không đủ số lượng thiết bị (Cần: ${reqQty}, Kho còn: ${stockAvailable})`;
+      } else {
+        newStatus = 'DA_QL_KHO_DUYET';
+        autoMsg = `Trưởng khoa đã duyệt. Hệ thống kiểm tra kho đủ số lượng (${stockAvailable}/${reqQty}) và tự động duyệt chuyển cho NV Kho cấp phát.`;
+      }
+    } else if (approved && target?.loaiDeXuat === 'DIEU_CHUYEN') {
+      newStatus = 'CHO_KHOA_NHAN_TEST';
+      autoMsg = 'Trưởng khoa đã duyệt điều chuyển, chuyển sang bước kiểm tra & tiếp nhận tại Khoa nhận.';
+    }
+
     store.setRequests(requests.map(r => r.maPhieu === maPhieu ? {
       ...r,
-      trangThai: approved ? 'DA_DUYET' as const : 'TU_CHOI' as const,
+      trangThai: newStatus,
       ngayDuyet: new Date().toISOString(),
-      lyDoTuChoi: lyDo
+      lyDoTuChoi: newStatus === 'TU_CHOI' ? autoMsg : r.lyDoTuChoi
     } : r));
-    return { success: true };
+    window.dispatchEvent(new CustomEvent('store_requests_changed'));
+    return { success: true, newStatus, message: autoMsg };
   }
   const result = await fetchApi<any>(`/requests/${maPhieu}/approve-dept`, { method: 'PUT', body: JSON.stringify({ approved, lyDo }) });
-  if (result.success) await refreshData('requests');
+  if (result.success) {
+    await refreshData('requests');
+    window.dispatchEvent(new CustomEvent('store_requests_changed'));
+  }
   return result;
 }
 
@@ -747,18 +826,65 @@ export async function apiReopenNeed(id: string) {
 export async function apiConfirmTransfer(maPhieu: string, data: { checklist: any; ghiChu?: string }) {
   if (isMockMode()) {
     const requests = store.getRequests();
+    const req = requests.find(r => r.maPhieu === maPhieu);
     store.setRequests(requests.map(r => r.maPhieu === maPhieu ? {
       ...r,
       trangThai: 'HOAN_THANH',
       checklistKyThuat: data.checklist,
       ngayTiepNhan: new Date().toISOString()
     } : r));
+
+    if (req) {
+      const maKhoaGiao = req.maKhoa;
+      const maKhoaNhan = req.maKhoaNhan;
+      const maThietBi = req.maThietBi;
+
+      // Cập nhật allocations của store
+      const allocations = store.getAllocations();
+      const updatedAllocs = allocations.map(a => {
+        if ((a.maKhoa === maKhoaGiao || a.maKhoaNhan === maKhoaGiao) && a.maThietBi === maThietBi && a.trangThaiTra !== 'DA_TRA') {
+          if ((a.soLuongCapPhat || 1) <= 1) {
+            return { ...a, trangThaiTra: 'DA_TRA' as const };
+          } else {
+            return { ...a, soLuongCapPhat: (a.soLuongCapPhat || 1) - 1 };
+          }
+        }
+        return a;
+      });
+
+      if (maKhoaNhan) {
+        const newAlloc: PhieuCapPhat = {
+          maPhieu: generateId('CP'),
+          maPhieuYeuCau: maPhieu,
+          maNhanVienKho: 'NV001',
+          maThietBi: maThietBi,
+          tenThietBi: req.tenThietBi || '',
+          loaiThietBi: 'TAI_SU_DUNG',
+          donViTinh: 'Cái',
+          soLuongCoSo: 1,
+          maNguoiMuon: req.maNguoiYeuCau,
+          maKhoa: maKhoaNhan,
+          soLuongCapPhat: 1,
+          ngayCapPhat: new Date().toISOString(),
+          ngayDuKienTra: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          trangThaiTra: 'CHUA_TRA',
+          ghiChu: `Tiếp nhận điều chuyển từ phiếu ${maPhieu}`
+        };
+        updatedAllocs.push(newAlloc);
+      }
+      store.setAllocations(updatedAllocs);
+      window.dispatchEvent(new CustomEvent('store_allocations_changed'));
+    }
     return { success: true, message: "Đã xác nhận kiểm tra và tiếp nhận máy." };
   }
   const result = await fetchApi<any>(`/requests/${maPhieu}/confirm-transfer`, { method: 'PUT', body: JSON.stringify(data) });
   if (result.success) {
     await refreshData('requests');
     await refreshData('equipment');
+    await refreshData('allocations');
+    window.dispatchEvent(new CustomEvent('store_allocations_changed'));
+    window.dispatchEvent(new CustomEvent('store_requests_changed'));
+    window.dispatchEvent(new CustomEvent('store_instances_changed'));
   }
   return result;
 }

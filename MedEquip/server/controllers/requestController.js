@@ -104,6 +104,9 @@ export async function createRequest(req, res) {
     if (loaiDeXuat === 'DIEU_CHUYEN') {
       prefix = 'DXDC-';
       notifTitle = 'Đề xuất điều chuyển thiết bị mới';
+    } else if (loaiDeXuat === 'DE_XUAT_THEM') {
+      prefix = 'DXNT-';
+      notifTitle = 'Đề xuất nhập thêm thiết bị từ Khoa';
     } else if (loaiDeXuat === 'MUA_SAM') {
       prefix = 'DXMS-';
       notifTitle = 'Đề xuất mua sắm thiết bị mới';
@@ -118,7 +121,24 @@ export async function createRequest(req, res) {
     let finalItems = items && Array.isArray(items) && items.length > 0 ? items : [];
 
     if (finalItems.length === 0) {
-      if (loaiDeXuat === 'MUA_SAM') {
+      if (loaiDeXuat === 'DE_XUAT_THEM') {
+        let tbTen = tenThietBiMoi;
+        let dvt = req.body.donViTinh || req.body.donVi;
+        if (req.body.maThietBi) {
+          const [tbRows] = await conn.query("SELECT ten_thiet_bi, don_vi_co_so FROM thiet_bi WHERE ma_thiet_bi = ?", [req.body.maThietBi]);
+          if (tbRows.length > 0) {
+            tbTen = tbRows[0].ten_thiet_bi;
+            if (!dvt) dvt = tbRows[0].don_vi_co_so;
+          }
+        }
+        finalItems = [{
+          maThietBi: req.body.maThietBi || 'TB-RESTOCK',
+          tenThietBi: tbTen || 'Thiết bị đề xuất nhập thêm',
+          soLuong: req.body.soLuong || 1,
+          donVi: dvt || 'Cái',
+          ngayTraDuKien: req.body.ngayTraDuKien || null
+        }];
+      } else if (loaiDeXuat === 'MUA_SAM') {
         finalItems = [{
           maThietBi: 'NEW_PURCHASE',
           tenThietBi: tenThietBiMoi || 'Thiết bị mua sắm mới',
@@ -201,6 +221,7 @@ export async function createRequest(req, res) {
 export async function approveDept(req, res) {
   const conn = await pool.getConnection();
   try {
+    await conn.beginTransaction();
     let items = req.body.items;
     const phieuId = req.params.id;
 
@@ -278,7 +299,152 @@ export async function approveDept(req, res) {
       });
     }
 
-    // Luồng thông thường (Cấp phát kho / Báo hỏng / Mua sắm)
+    // Xử lý tự động hóa cho yêu cầu cấp phát thiết bị từ kho (CAP_PHAT)
+    if (currentReq.loai_de_xuat === 'CAP_PHAT') {
+      // 1. Lấy tên khoa yêu cầu
+      const [khoaRows] = await conn.query("SELECT ten_khoa FROM khoa WHERE ma_khoa = ?", [currentReq.ma_khoa]);
+      const tenKhoa = khoaRows[0]?.ten_khoa || currentReq.ma_khoa;
+
+      // 2. Lấy danh sách thiết bị được duyệt trong phiếu kèm tồn kho thực tế
+      const [approvedDetails] = await conn.query(
+        `SELECT ct.*, COALESCE(t.ten_thiet_bi, ct.ma_thiet_bi) as ten_thiet_bi, t.loai_thiet_bi,
+                COALESCE(tk.so_luong_kho, 0) as so_luong_kho
+         FROM chi_tiet_yeu_cau ct
+         LEFT JOIN thiet_bi t ON ct.ma_thiet_bi = t.ma_thiet_bi
+         LEFT JOIN ton_kho tk ON ct.ma_thiet_bi = tk.ma_thiet_bi
+         WHERE ct.ma_phieu_yeu_cau = ? AND ct.trang_thai != 'TU_CHOI'`,
+        [phieuId]
+      );
+
+      // 3. Kiểm tra số lượng tồn kho có đáp ứng cho từng thiết bị
+      const insufficientItems = [];
+      const stockSummary = [];
+
+      for (const item of approvedDetails) {
+        let availableQty = Number(item.so_luong_kho) || 0;
+
+        // Nếu là thiết bị tái sử dụng, kiểm tra số máy cá thể thực tế có tại kho không bị hỏng
+        if (item.loai_thiet_bi === 'TAI_SU_DUNG') {
+          const [instanceCount] = await conn.query(
+            `SELECT COUNT(*) as count FROM ca_the_thiet_bi 
+             WHERE ma_thiet_bi = ? AND vi_tri_hien_tai = 'KHO' 
+             AND trang_thai NOT IN ('HONG_CHO_SUA', 'DANG_BAO_TRI')`,
+            [item.ma_thiet_bi]
+          );
+          const instAvailable = instanceCount[0]?.count ?? availableQty;
+          if (instAvailable > 0 || availableQty > 0) {
+            availableQty = Math.min(availableQty, instAvailable > 0 ? instAvailable : availableQty);
+          }
+        }
+
+        const requiredQty = Number(item.so_luong) || 1;
+        if (availableQty < requiredQty) {
+          insufficientItems.push({
+            maThietBi: item.ma_thiet_bi,
+            tenThietBi: item.ten_thiet_bi,
+            soLuongCan: requiredQty,
+            soLuongKho: availableQty
+          });
+        }
+        stockSummary.push(`${item.ten_thiet_bi}: Cần ${requiredQty}, Kho còn ${availableQty}`);
+      }
+
+      const stockSummaryStr = stockSummary.join('; ');
+
+      if (insufficientItems.length > 0) {
+        // TỒN KHO KHÔNG ĐỦ -> HỆ THỐNG TỰ ĐỘNG TỪ CHỐI
+        const reasonDetail = insufficientItems.map(i => `${i.tenThietBi} (Cần: ${i.soLuongCan}, Kho chỉ còn: ${i.soLuongKho})`).join(', ');
+        const autoRejectReason = `Tự động từ chối bởi Hệ thống: Kho không đủ số lượng thiết bị khả dụng [${reasonDetail}]`;
+
+        await conn.query(
+          "UPDATE phieu_yeu_cau SET trang_thai = 'TU_CHOI', ly_do_tu_choi = ?, ngay_duyet = NOW(), nguoi_duyet = ? WHERE ma_phieu = ?",
+          [autoRejectReason, req.user.userId, phieuId]
+        );
+
+        await conn.query(
+          "UPDATE chi_tiet_yeu_cau SET trang_thai = 'TU_CHOI', ly_do_tu_choi = ? WHERE ma_phieu_yeu_cau = ? AND trang_thai != 'TU_CHOI'",
+          [autoRejectReason, phieuId]
+        );
+
+        // Thông báo cho Quản lý kho (giám sát)
+        const [qlKho] = await conn.query("SELECT ma_nguoi_dung FROM nguoi_dung WHERE vai_tro = 'QL_KHO'");
+        for (const ql of qlKho) {
+          await sendNotification(
+            ql.ma_nguoi_dung,
+            "Cảnh báo thiếu hàng cấp phát (Tự động từ chối)",
+            `Phiếu yêu cầu cấp phát ${phieuId} của ${tenKhoa} đã bị Hệ thống tự động từ chối do kho không đủ số lượng thiết bị: ${reasonDetail}.`,
+            "warning"
+          );
+        }
+
+        // Thông báo cho Người yêu cầu & Trưởng khoa
+        await sendNotification(
+          currentReq.ma_nguoi_yeu_cau,
+          "Yêu cầu cấp phát bị từ chối tự động",
+          `Yêu cầu cấp phát ${phieuId} của bạn bị Hệ thống từ chối tự động do kho hiện không đủ số lượng thiết bị (${reasonDetail}). Vui lòng liên hệ điều chuyển hoặc tạo đề xuất mua sắm.`,
+          "error"
+        );
+
+        await conn.commit();
+        return res.json({
+          success: true,
+          newStatus: "TU_CHOI",
+          autoRejected: true,
+          message: `Trưởng khoa đã duyệt nhưng Hệ thống tự động từ chối do kho không đủ số lượng: ${reasonDetail}`
+        });
+      } else {
+        // TỒN KHO ĐỦ -> HỆ THỐNG TỰ ĐỘNG DUYỆT VÀ CHUYỂN CHO NHÂN VIÊN KHO CẤP PHÁT
+        await conn.query(
+          "UPDATE phieu_yeu_cau SET trang_thai = 'DA_QL_KHO_DUYET', ngay_duyet = NOW(), nguoi_duyet = ? WHERE ma_phieu = ?",
+          [req.user.userId, phieuId]
+        );
+
+        await conn.query(
+          "UPDATE chi_tiet_yeu_cau SET trang_thai = 'DA_DUYET' WHERE ma_phieu_yeu_cau = ? AND trang_thai != 'TU_CHOI'",
+          [phieuId]
+        );
+
+        // Thông báo cho Quản lý kho (chỉ cần biết thông tin thông báo)
+        const [qlKho] = await conn.query("SELECT ma_nguoi_dung FROM nguoi_dung WHERE vai_tro = 'QL_KHO'");
+        for (const ql of qlKho) {
+          await sendNotification(
+            ql.ma_nguoi_dung,
+            "Hệ thống tự động duyệt cấp phát",
+            `Phiếu ${phieuId} của ${tenKhoa} đã được Trưởng khoa duyệt và Hệ thống tự động phê duyệt (kho đủ hàng: ${stockSummaryStr}). Đã chuyển cho Nhân viên kho cấp phát.`,
+            "info"
+          );
+        }
+
+        // Thông báo cho Nhân viên kho (thực hiện việc cấp phát)
+        const [nvKho] = await conn.query("SELECT ma_nguoi_dung FROM nguoi_dung WHERE vai_tro = 'NV_KHO'");
+        for (const nv of nvKho) {
+          await sendNotification(
+            nv.ma_nguoi_dung,
+            "Phiếu cấp phát sẵn sàng xuất kho",
+            `Phiếu cấp phát ${phieuId} của ${tenKhoa} đã được tự động duyệt (kho đủ hàng: ${stockSummaryStr}). Vui lòng chuẩn bị thiết bị, quét mã và bàn giao cho khoa.`,
+            "warning"
+          );
+        }
+
+        // Thông báo cho Người yêu cầu
+        await sendNotification(
+          currentReq.ma_nguoi_yeu_cau,
+          "Yêu cầu cấp phát đã được phê duyệt",
+          `Yêu cầu cấp phát ${phieuId} của bạn đã được Trưởng khoa phê duyệt và Hệ thống tự động duyệt do kho còn đủ thiết bị. Đang chờ Nhân viên kho xuất thiết bị.`,
+          "success"
+        );
+
+        await conn.commit();
+        return res.json({
+          success: true,
+          newStatus: "DA_QL_KHO_DUYET",
+          autoApproved: true,
+          message: `Trưởng khoa đã duyệt. Hệ thống kiểm tra kho đủ số lượng (${stockSummaryStr}) và đã tự động phê duyệt chuyển cho Nhân viên kho cấp phát.`
+        });
+      }
+    }
+
+    // Các luồng khác (Báo hỏng / Mua sắm mới) -> Chuyển cho Quản lý kho xem xét
     await conn.query(
       "UPDATE phieu_yeu_cau SET trang_thai = 'CHO_QL_KHO_DUYET', ngay_duyet = NOW(), nguoi_duyet = ? WHERE ma_phieu = ?",
       [req.user.userId, phieuId]
@@ -286,14 +452,14 @@ export async function approveDept(req, res) {
     
     const [qlKho] = await conn.query("SELECT ma_nguoi_dung FROM nguoi_dung WHERE vai_tro = 'QL_KHO'");
     for(const ql of qlKho) {
-      await sendNotification(ql.ma_nguoi_dung, "Yêu cầu cần duyệt", `Có yêu cầu cấp phát ${phieuId} đã được Trưởng khoa duyệt ${approvedCount} thiết bị, đang chờ bạn xử lý.`, "info");
+      await sendNotification(ql.ma_nguoi_dung, "Đề xuất cần xem xét", `Có đề xuất ${phieuId} (${currentReq.loai_de_xuat}) đã được Trưởng khoa phê duyệt, đang chờ bạn xử lý.`, "info");
     }
 
-    const msg = `Yêu cầu cấp phát ${phieuId} của bạn đã được Trưởng khoa phê duyệt ${approvedCount} thiết bị, chờ QL Kho duyệt.`;
-    await sendNotification(currentReq.ma_nguoi_yeu_cau, "Yêu cầu được chấp nhận", msg, "success");
+    const msg = `Đề xuất ${phieuId} của bạn đã được Trưởng khoa phê duyệt, đang chờ Quản lý kho xem xét.`;
+    await sendNotification(currentReq.ma_nguoi_yeu_cau, "Đề xuất được chấp nhận", msg, "success");
 
     await conn.commit();
-    res.json({ success: true, newStatus: "CHO_QL_KHO_DUYET", message: "Đã duyệt." });
+    res.json({ success: true, newStatus: "CHO_QL_KHO_DUYET", message: "Trưởng khoa đã duyệt đề xuất." });
   } catch (err) {
     try { await conn.rollback(); } catch(e) {}
     console.error(err);
@@ -355,8 +521,16 @@ export async function approveManager(req, res) {
         // Cập nhật máy sang trạng thái đang bảo trì/sửa chữa
         await conn.query("UPDATE ca_the_thiet_bi SET trang_thai = 'DANG_BAO_TRI', ngay_cap_nhat = NOW() WHERE ma_ca_the = ?", [p.ma_ca_the]);
         await conn.query("UPDATE phieu_yeu_cau SET trang_thai = 'HOAN_THANH', ngay_duyet = NOW(), nguoi_duyet = ? WHERE ma_phieu = ?", [req.user.userId, phieuId]);
-      } else if (p?.loai_de_xuat === 'MUA_SAM') {
+      } else if (p?.loai_de_xuat === 'DE_XUAT_THEM' || p?.loai_de_xuat === 'MUA_SAM') {
         await conn.query("UPDATE phieu_yeu_cau SET trang_thai = 'DA_DUYET', ngay_duyet = NOW(), nguoi_duyet = ? WHERE ma_phieu = ?", [req.user.userId, phieuId]);
+        // Không gửi thông báo cho NV Kho (vì NV Kho không có vai trò trong nhập hàng/mua sắm)
+        // Thông báo trực tiếp cho Trợ lý Khoa và Trưởng khoa
+        await sendNotification(
+          reqData[0].ma_nguoi_yeu_cau,
+          "Đề xuất nhập thêm đã được phê duyệt",
+          `Quản lý Kho đã phê duyệt đề xuất nhập thêm thiết bị (${phieuId}). Bộ phận Quản lý Kho đang lập kế hoạch nhập hàng về kho trung tâm.`,
+          "success"
+        );
       } else {
         await conn.query(
           "UPDATE phieu_yeu_cau SET trang_thai = 'DA_QL_KHO_DUYET' WHERE ma_phieu = ?",
@@ -370,18 +544,88 @@ export async function approveManager(req, res) {
       }
     }
 
-    const msg = isAllRejected ? `Yêu cầu cấp phát ${phieuId} đã bị từ chối hoàn toàn bởi QL Kho.` : `Yêu cầu cấp phát ${phieuId} đã được Quản lý Kho phê duyệt ${approvedCount} thiết bị, chờ NV Kho thực hiện.`;
-    await sendNotification(reqData[0].ma_nguoi_yeu_cau, isAllRejected ? "Yêu cầu bị từ chối" : "Yêu cầu được chấp nhận", msg, isAllRejected ? "error" : "success");
+    const [pInfo] = await conn.query("SELECT loai_de_xuat FROM phieu_yeu_cau WHERE ma_phieu = ?", [phieuId]);
+    const isRestockProposal = pInfo[0]?.loai_de_xuat === 'DE_XUAT_THEM';
 
-    const [tkData] = await conn.query("SELECT ma_nguoi_dung FROM nguoi_dung WHERE ma_khoa = ? AND vai_tro = 'TRUONG_KHOA'", [reqData[0].ma_khoa]);
-    for (const tk of tkData) {
-      if (tk.ma_nguoi_dung !== reqData[0].ma_nguoi_yeu_cau) {
-        await sendNotification(tk.ma_nguoi_dung, isAllRejected ? "Yêu cầu của Khoa bị từ chối" : "Yêu cầu của Khoa được chấp nhận", msg, isAllRejected ? "error" : "success");
+    if (!isRestockProposal) {
+      const msg = isAllRejected ? `Yêu cầu cấp phát ${phieuId} đã bị từ chối hoàn toàn bởi QL Kho.` : `Yêu cầu cấp phát ${phieuId} đã được Quản lý Kho phê duyệt ${approvedCount} thiết bị, chờ NV Kho thực hiện.`;
+      await sendNotification(reqData[0].ma_nguoi_yeu_cau, isAllRejected ? "Yêu cầu bị từ chối" : "Yêu cầu được chấp nhận", msg, isAllRejected ? "error" : "success");
+
+      const [tkData] = await conn.query("SELECT ma_nguoi_dung FROM nguoi_dung WHERE ma_khoa = ? AND vai_tro = 'TRUONG_KHOA'", [reqData[0].ma_khoa]);
+      for (const tk of tkData) {
+        if (tk.ma_nguoi_dung !== reqData[0].ma_nguoi_yeu_cau) {
+          await sendNotification(tk.ma_nguoi_dung, isAllRejected ? "Yêu cầu của Khoa bị từ chối" : "Yêu cầu của Khoa được chấp nhận", msg, isAllRejected ? "error" : "success");
+        }
+      }
+    } else {
+      const [tkData] = await conn.query("SELECT ma_nguoi_dung FROM nguoi_dung WHERE ma_khoa = ? AND vai_tro = 'TRUONG_KHOA'", [reqData[0].ma_khoa]);
+      for (const tk of tkData) {
+        if (tk.ma_nguoi_dung !== reqData[0].ma_nguoi_yeu_cau) {
+          await sendNotification(
+            tk.ma_nguoi_dung,
+            "Đề xuất nhập thêm của Khoa đã được duyệt",
+            `Quản lý Kho đã phê duyệt đề xuất nhập thêm thiết bị (${phieuId}) của Khoa. Đang chuẩn bị kế hoạch nhập hàng về kho.`,
+            "info"
+          );
+        }
       }
     }
 
     await conn.commit();
-    res.json({ success: true, newStatus: isAllRejected ? "TU_CHOI" : "DA_QL_KHO_DUYET", message: isAllRejected ? "Đã từ chối tất cả." : "Quản lý đã duyệt." });
+    res.json({ 
+      success: true, 
+      newStatus: isAllRejected ? "TU_CHOI" : (isRestockProposal ? "DA_DUYET" : "DA_QL_KHO_DUYET"), 
+      message: isAllRejected ? "Đã từ chối tất cả." : (isRestockProposal ? "Quản lý kho đã duyệt đề xuất nhập thêm." : "Quản lý đã duyệt.") 
+    });
+  } catch (err) {
+    try { await conn.rollback(); } catch(e) {}
+    console.error(err);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ." });
+  } finally {
+    try { conn.release(); } catch(e) {}
+  }
+}
+
+// QL Kho xác nhận hàng đã về kho cho đề xuất nhập thêm (hoàn tất quy trình restock)
+export async function completeRestock(req, res) {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const phieuId = req.params.id;
+    const [pRows] = await conn.query("SELECT ma_nguoi_yeu_cau, ma_khoa, ma_thiet_bi, loai_de_xuat FROM phieu_yeu_cau WHERE ma_phieu = ?", [phieuId]);
+    if (pRows.length === 0) {
+      await conn.rollback();
+      return res.status(404).json({ success: false, message: "Không tìm thấy phiếu" });
+    }
+    const p = pRows[0];
+    await conn.query("UPDATE phieu_yeu_cau SET trang_thai = 'HOAN_THANH', ngay_cap_nhat = NOW() WHERE ma_phieu = ?", [phieuId]);
+
+    // Lấy tên thiết bị
+    const [ctRows] = await conn.query("SELECT ten_thiet_bi FROM chi_tiet_yeu_cau WHERE ma_phieu_yeu_cau = ? LIMIT 1", [phieuId]);
+    const deviceName = ctRows[0]?.ten_thiet_bi || p.ma_thiet_bi || 'thiết bị';
+
+    // Bắn thông báo cho Trợ lý khoa và Trưởng khoa
+    await sendNotification(
+      p.ma_nguoi_yeu_cau,
+      "Hàng đã về kho thành công",
+      `Thiết bị "${deviceName}" theo đề xuất nhập thêm ${phieuId} đã có hàng tại kho trung tâm. Khoa của bạn có thể tiến hành tạo Yêu cầu cấp phát ngay bây giờ!`,
+      "success"
+    );
+
+    const [tkList] = await conn.query("SELECT ma_nguoi_dung FROM nguoi_dung WHERE ma_khoa = ? AND vai_tro = 'TRUONG_KHOA'", [p.ma_khoa]);
+    for(const tk of tkList) {
+      if (tk.ma_nguoi_dung !== p.ma_nguoi_yeu_cau) {
+        await sendNotification(
+          tk.ma_nguoi_dung,
+          "Hàng đề xuất đã về kho",
+          `Thiết bị "${deviceName}" theo đề xuất nhập thêm ${phieuId} đã được Quản lý Kho nhập về thành công. Trợ lý khoa có thể tạo Yêu cầu cấp phát để nhận hàng.`,
+          "info"
+        );
+      }
+    }
+
+    await conn.commit();
+    res.json({ success: true, message: "Đã xác nhận hàng về kho và hoàn tất đề xuất. Hệ thống đã thông báo cho Trợ lý Khoa." });
   } catch (err) {
     try { await conn.rollback(); } catch(e) {}
     console.error(err);
@@ -630,17 +874,121 @@ export async function confirmTransfer(req, res) {
     }
 
     const maCaThe = phieu.ma_ca_the;
+    const maKhoaGiao = phieu.ma_khoa;
     const maKhoaNhan = phieu.ma_khoa_nhan;
+    const maThietBi = phieu.ma_thiet_bi;
 
-    // 1. Cập nhật vị trí của cá thể thiết bị sang khoa nhận
-    if (maCaThe && maKhoaNhan) {
+    // 1. Lấy tên khoa gửi và nhận
+    const [deptA] = await conn.query("SELECT ten_khoa FROM khoa WHERE ma_khoa = ?", [maKhoaGiao]);
+    const [deptB] = await conn.query("SELECT ten_khoa FROM khoa WHERE ma_khoa = ?", [maKhoaNhan]);
+    const tenKhoaA = deptA[0]?.ten_khoa || maKhoaGiao;
+    const tenKhoaB = deptB[0]?.ten_khoa || maKhoaNhan;
+
+    // 2. Tìm thông tin phiếu cấp phát hiện tại của cá thể / thiết bị tại khoa giao
+    let oldCpId = null;
+    let oldDueDate = null;
+    let donViTinh = 'Cái';
+
+    if (maCaThe) {
+      const [caTheRows] = await conn.query(
+        "SELECT ma_phieu_cap_phat_hien_tai, ngay_tra_du_kien FROM ca_the_thiet_bi WHERE ma_ca_the = ?",
+        [maCaThe]
+      );
+      if (caTheRows.length > 0) {
+        oldCpId = caTheRows[0].ma_phieu_cap_phat_hien_tai;
+        oldDueDate = caTheRows[0].ngay_tra_du_kien;
+      }
+    }
+
+    if (!oldCpId && maThietBi && maKhoaGiao) {
+      const [allocRows] = await conn.query(
+        `SELECT c.ma_phieu_cap_phat, c.ngay_tra_du_kien, c.don_vi_tinh 
+         FROM chi_tiet_cap_phat c
+         JOIN phieu_cap_phat p ON c.ma_phieu_cap_phat = p.ma_phieu
+         WHERE p.ma_khoa_nhan = ? AND c.ma_thiet_bi = ? AND c.trang_thai_tra != 'DA_TRA'
+         ORDER BY p.ngay_cap DESC LIMIT 1`,
+        [maKhoaGiao, maThietBi]
+      );
+      if (allocRows.length > 0) {
+        oldCpId = allocRows[0].ma_phieu_cap_phat;
+        oldDueDate = allocRows[0].ngay_tra_du_kien;
+        donViTinh = allocRows[0].don_vi_tinh || 'Cái';
+      }
+    }
+
+    if (maThietBi) {
+      const [tbInfo] = await conn.query("SELECT don_vi_co_so FROM thiet_bi WHERE ma_thiet_bi = ?", [maThietBi]);
+      if (tbInfo.length > 0 && tbInfo[0].don_vi_co_so) {
+        donViTinh = tbInfo[0].don_vi_co_so;
+      }
+    }
+
+    // 3. Trừ đi thiết bị / cá thể khỏi Khoa giao (Khoa A)
+    if (oldCpId) {
+      if (maCaThe) {
+        await conn.query(
+          "UPDATE cap_phat_ca_the SET trang_thai = 'DA_DIEU_CHUYEN' WHERE ma_ca_the = ? AND ma_phieu_cap_phat = ?",
+          [maCaThe, oldCpId]
+        );
+      }
+
+      const [activeRows] = await conn.query(
+        "SELECT COUNT(*) as cnt FROM cap_phat_ca_the WHERE ma_phieu_cap_phat = ? AND trang_thai = 'DANG_SU_DUNG'",
+        [oldCpId]
+      );
+      const activeCount = activeRows[0]?.cnt || 0;
+
+      const [detailRows] = await conn.query(
+        "SELECT so_luong, so_luong_co_so FROM chi_tiet_cap_phat WHERE ma_phieu_cap_phat = ? AND ma_thiet_bi = ?",
+        [oldCpId, maThietBi]
+      );
+      const currentQty = detailRows[0]?.so_luong || 1;
+
+      if (activeCount === 0 || currentQty <= 1) {
+        await conn.query(
+          "UPDATE chi_tiet_cap_phat SET trang_thai_tra = 'DA_TRA', ly_do_gia_han = ? WHERE ma_phieu_cap_phat = ? AND ma_thiet_bi = ?",
+          [`Điều chuyển sang ${tenKhoaB} (${phieuId})`, oldCpId, maThietBi]
+        );
+      } else {
+        await conn.query(
+          "UPDATE chi_tiet_cap_phat SET so_luong = so_luong - 1, so_luong_co_so = GREATEST(0, so_luong_co_so - 1) WHERE ma_phieu_cap_phat = ? AND ma_thiet_bi = ?",
+          [oldCpId, maThietBi]
+        );
+      }
+    }
+
+    // 4. Tạo phiếu cấp phát / tiếp nhận mới cho Khoa nhận (Khoa B)
+    const newCpId = "CP-" + new Date().toISOString().slice(0, 10).replace(/-/g, "") + "-" + String(Date.now()).slice(-4);
+    await conn.query(
+      "INSERT INTO phieu_cap_phat (ma_phieu, ma_phieu_yeu_cau, ma_nguoi_cap, ma_khoa_nhan, ghi_chu, ngay_cap) VALUES (?, ?, ?, ?, ?, NOW())",
+      [newCpId, phieuId, req.user.userId, maKhoaNhan, `Tiếp nhận điều chuyển từ ${tenKhoaA} (${phieuId})`]
+    );
+
+    await conn.query(
+      "INSERT INTO chi_tiet_cap_phat (ma_phieu_cap_phat, ma_thiet_bi, so_luong, don_vi_tinh, so_luong_co_so, ngay_tra_du_kien, trang_thai_tra) VALUES (?, ?, 1, ?, 1, ?, 'CHUA_TRA')",
+      [newCpId, maThietBi, donViTinh, oldDueDate || null]
+    );
+
+    // 5. Cập nhật vị trí cá thể thiết bị sang Khoa nhận
+    if (maCaThe) {
       await conn.query(
-        "UPDATE ca_the_thiet_bi SET ma_khoa_hien_tai = ?, vi_tri_hien_tai = 'KHOA_PHONG', trang_thai = 'DANG_SU_DUNG', ngay_cap_nhat = NOW() WHERE ma_ca_the = ?",
-        [maKhoaNhan, maCaThe]
+        `UPDATE ca_the_thiet_bi 
+         SET ma_khoa_hien_tai = ?, 
+             ma_phieu_cap_phat_hien_tai = ?, 
+             vi_tri_hien_tai = 'KHOA_PHONG', 
+             trang_thai = 'DANG_SU_DUNG', 
+             ngay_cap_nhat = NOW() 
+         WHERE ma_ca_the = ?`,
+        [maKhoaNhan, newCpId, maCaThe]
+      );
+
+      await conn.query(
+        "INSERT INTO cap_phat_ca_the (ma_phieu_cap_phat, ma_thiet_bi, ma_ca_the, trang_thai) VALUES (?, ?, ?, 'DANG_SU_DUNG')",
+        [newCpId, maThietBi, maCaThe]
       );
     }
 
-    // 2. Cập nhật trạng thái phiếu và checklist kỹ thuật
+    // 6. Cập nhật trạng thái phiếu điều chuyển và checklist kỹ thuật
     const checklistStr = checklist ? JSON.stringify(checklist) : null;
     await conn.query(
       `UPDATE phieu_yeu_cau 
@@ -654,7 +1002,7 @@ export async function confirmTransfer(req, res) {
       [phieuId]
     );
 
-    // 3. Nếu phiếu điều chuyển gắn liền với Nhu cầu nội viện, cập nhật tiến độ đáp ứng
+    // 7. Nếu phiếu điều chuyển gắn liền với Nhu cầu nội viện, cập nhật tiến độ đáp ứng
     if (phieu.ma_nhu_cau) {
       await conn.query(
         `UPDATE nhu_cau_thiet_bi 
@@ -665,13 +1013,7 @@ export async function confirmTransfer(req, res) {
       );
     }
 
-    // 4. Lấy tên khoa gửi và nhận
-    const [deptA] = await conn.query("SELECT ten_khoa FROM khoa WHERE ma_khoa = ?", [phieu.ma_khoa]);
-    const [deptB] = await conn.query("SELECT ten_khoa FROM khoa WHERE ma_khoa = ?", [maKhoaNhan]);
-    const tenKhoaA = deptA[0]?.ten_khoa || phieu.ma_khoa;
-    const tenKhoaB = deptB[0]?.ten_khoa || maKhoaNhan;
-
-    // 5. Gửi thông báo cho người lập đề xuất (Khoa giao)
+    // 8. Gửi thông báo cho người lập đề xuất (Khoa giao)
     await sendNotification(
       phieu.ma_nguoi_yeu_cau,
       "Bàn giao điều chuyển thành công",

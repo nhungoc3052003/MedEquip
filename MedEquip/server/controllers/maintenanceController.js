@@ -53,11 +53,13 @@ export async function getAllMaintenance(req, res) {
       `, [item.ma_thiet_bi]);
 
       // Nếu là vai trò Khoa: chỉ hiển thị nếu khoa mình đang mượn thiết bị này
+      let soLuongTaiKhoa = 0;
       if (isDepartmentRole) {
-        const myDeptAlloc = allocations.find(a => a.ma_khoa === userDept);
-        if (!myDeptAlloc) {
+        const myDeptAllocs = allocations.filter(a => a.ma_khoa === userDept);
+        if (myDeptAllocs.length === 0) {
           continue; // Thiết bị nằm ở kho hoặc khoa khác -> ẨN
         }
+        soLuongTaiKhoa = myDeptAllocs.reduce((sum, a) => sum + (Number(a.so_luong) || 0), 0);
       }
 
       const dangOPhuongKhoa = allocations.length > 0;
@@ -97,6 +99,7 @@ export async function getAllMaintenance(req, res) {
         soNgayConLai,
         soLuongKho: item.so_luong_kho || 0,
         soLuongDangDung: item.so_luong_dang_dung || 0,
+        soLuongTaiKhoa: isDepartmentRole ? soLuongTaiKhoa : (item.so_luong_dang_dung || 0),
         viTriHienTai: tenKhoaSuDung,
         dangSuDung: dangOPhuongKhoa,
         tenNhaCungCap: item.ten_nha_cung_cap || "",
