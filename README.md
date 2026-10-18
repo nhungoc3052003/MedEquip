@@ -1,4 +1,4 @@
-# MedEquip - Hệ thống Quản lý Thiết bị Y tế Bệnh viện
+# MedEquip - Hệ thống tự động hóa quản lý kho thiết bị y tế bệnh viện
 
 Dự án phần mềm quản lý kho thiết bị y tế và vật tư tiêu hao nội bộ bệnh viện. 
 Phiên bản v4 đi kèm với các cập nhật lớn về kiến trúc, phân quyền chặt chẽ (RBAC), hệ thống cảnh báo tự động, xử lý quét QR code trả thiết bị, và giỏ hàng cấp phát.
